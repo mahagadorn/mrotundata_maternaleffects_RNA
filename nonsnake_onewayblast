@@ -1,0 +1,52 @@
+#Created 9.30.22
+#Last edited 9.30.22
+
+#This is the script for running a one-way blast to find the shared genes between Yocum et al 2018 and this paper's genes. 
+#Because both are M. rotundata we decided to only run a one-way blast. Therefore the below script is just to that point. 
+#Users can do their own filtering to find the shared genes. 
+#all things in quotes need user input
+
+#make sure that all fastas are in the same folder and you are in that folder
+
+module load blast
+makeblastdb -in 'fastas.dataset1' -dbtype nucl -parse_seqids
+makeblastdb -in 'fastas.dataset2' -dbtype nucl -parse_seqids
+
+blastn -query 'fastas.dataset1' -db 'fastas.dataset2' -out 'outputfilename' -evalue 10e-5 -outfmt 7 -max_target_seqs 1 -num_threads 16
+
+#then use either similar rules to the other snakemakes or other means to filter based on genes of interest in either study. 
+#because we only needed to look into which genes were significantly differentially expressed in early/late diapausing prepupae
+#but sampled in November, we just pulled from that supplement. Below list is that:
+'''
+Below is copied and pasted from the supplement file:
+Diferentially regulated genes common to all within month treatment comparisons.
+November Down Regulated Genes
+Gene_ID Description ELab versus LLab ELab versus EField EField versus LField LLab versus LField
+XLOC_002189 transcription factor SOX‐11 ‐0.941127 ‐0.669238 ‐1.155 ‐0.883115
+XLOC_003692 xaa‐Pro aminopeptidase 1‐like ‐1.7173 ‐2.21259 ‐1.51848 ‐2.01377
+XLOC_005534 putative fatty acyl‐CoA reductase CG5065‐ ‐1.04456 ‐0.640885 ‐1.34868 ‐0.945006
+XLOC_006049 tyrosine hydroxylase isoform X1 ‐1.43081 ‐2.0184 ‐1.37369 ‐1.96129
+XLOC_008673 NA ‐1.53605 ‐2.44247 ‐2.88614 ‐3.79257
+XLOC_011899 elongation of very long chain fatty acids ‐1.65802 ‐1.77167 ‐0.744568 ‐0.858215
+November Up Regulated Genes
+Gene_ID Description ELab versus LLab ELab versus EField EField versus LField LLab versus LField
+XLOC_004761 hexamerin 70b precursor 2.34809 1.46161 2.5034 1.61692
+XLOC_009125 lipase 1‐like isoform X1; lipase 1‐like 1.29764 1.14252 1.41126 1.25614
+XLOC_011394 leucine‐rich repeat neuronal protein 1‐like 0.860734 1.212 0.722264 1.07353
+Therefore,
+I only needed to see whether the below XLOC ID's were in our dataset of DEGs. 
+(all fold changes for early and late were at least 1 for either elab vs llab or efield vs lfield, except for XLOC_011394)
+Down-Regulated
+XLOC_002189
+XLOC_003692
+XLOC_005534
+XLOC_006049
+XLOC_008673
+XLOC_011899
+Up-Regulated
+XLOC_004761
+XLOC_009125
+XLOC_011394
+
+None turned out to be significantly differentially expressed in our dataset! 
+'''

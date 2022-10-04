@@ -1,0 +1,639 @@
+---
+title: 'WGCNA: Megachile rotundata Maternal Effects Project: Oocyte Samples'
+author: "M.A. Hagadorn"
+date: "`r format(Sys.time(), '%B %d, %Y')`"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = TRUE,
+	warning = TRUE,
+	background = "#F7F7F7",
+	highlight = TRUE,
+	tidy.opts = list(width.cutoff = 60), tidy = TRUE)
+```
+
+# Step One: Preparing for Analysis
+```{r loadpackages, warning=FALSE, echo=FALSE, message=FALSE, include=FALSE}
+#Library Necessary Packages
+library(formatR)
+library(flashClust)
+library(DESeq2) 
+library(gplots) 
+library(ggplot2)
+library(RColorBrewer)
+library(affycoretools)
+library(genefilter)
+library(plotrix)
+library(reshape2)
+library(vegan)
+library(adegenet)
+library(stringr)
+library(WGCNA)
+library(plyr)
+options(stringsAsFactors = FALSE)
+
+```
+
+```{r sessioninformation, echo=FALSE}
+installed.packages()[names(sessionInfo()$otherPkgs), "Version"]
+
+```
+
+Prior to the start of this analysis, 852 genes were removed from the analysis. This is based on WGCNA gene removal criteria applied to *ALL* samples. As such, the data frames containing **egg** and **ooctye** seperately will have equal number genes for downstream analyses. This is important for module overlap assessment.
+
+So, first we load in the oocyte specific expression data (that has been cleaned, i.e. genes removed).
+```{r loadOOCYTEData, echo=FALSE}
+load("data/Mrotundata_expdataClean_OOCYTE.RData")
+```
+
+# Step One: cluster samples
+## Cluster samples  to determine if there are obvious outliers
+```{r clustersamples}
+#create a distance matrix and do a hierachical cluster analysis
+#using data set with genes removed
+sampleTree_precut <- hclust(dist(expd_OOCYTE), method = "average")
+
+#plot the results
+##set parameters
+par(cex=0.6, mar=c(0,4,2,0))
+
+##plot
+plot(sampleTree_precut,
+     main="OOCYTE SAMPLES: clustering to detect outliers", 
+     sub="", xlab="", cex.lab =1.5, cex.axis=1.5, cex.main=2, cex=0.9)
+
+###
+###
+###
+#NO OUTLIERS DETECTED
+
+expdatOOCYTE <- expd_OOCYTE
+```
+
+
+## Read in the trait data the correspond to the samples
+```{r loadtraitdata}
+sampleData_all <- read.csv2("data/sample_data.csv", header = TRUE, sep= ",", as.is = TRUE)
+dim(sampleData_all)
+names(sampleData_all)
+
+##Remove columns that hold information we do not need to analysis
+sampleData <- sampleData_all[sampleData_all$oocyte_egg=="oocyte",-c(4,7,8)]
+dim(sampleData)
+names(sampleData)
+
+
+#Make new dataframe analogous to expression data that will hold the traits
+samples <- rownames(expdatOOCYTE) #save names of all rows in variable expdatOOCYTE_cleaned
+variableRows <- match(samples,sampleData$id) #returns vector of positions for these
+
+varData <- sampleData[variableRows, -1] #make new dataframe with ID removed but positions as rows
+rownames(varData) <- sampleData[variableRows, 1] #assign sample name as row name instead of position
+
+collectGarbage() #memory thing
+```
+
+## Vizualization: sample tree and traits
+```{r vizualize, fig.height = 16, fig.width = 14}
+#Setup:
+
+##expression data w/ genes and outliers removed==stored as expdatOOCYTE
+##Sample variables==stored as VarData
+
+
+#re-cluster samples (because we removed the one sample)
+sampleTree <- hclust(dist(expdatOOCYTE), method="average")
+
+
+#convert traits to a color representation: white=low; red=high, grey=missing
+varColors <- labels2colors(varData, naColor = "grey")
+
+
+#plot
+plotDendroAndColors(sampleTree, varColors,  #Sample tree with all samples
+                    groupLabels = names(varData), 
+                    setLayout=TRUE, 
+                    autoColorHeight = TRUE, 
+                    colorHeightMax = 0.3,
+                    main="Sample dendrogram and trait heatmap")
+```
+
+
+```{r save, echo=FALSE}
+## Save expression and trait data
+save(expdatOOCYTE, varData, file="Mrotundata_OOCYTE_step1_expression&variablesetup.RData")
+```
+
+
+
+
+# Step Two: Gene network and module identification
+## Soft-threshold
+```{r softy}
+#chose a set of soft-thresholding powers
+#these are candidate powers to use for discovering the power that fits the best
+powers <- c(c(1:10), seq(from=12, to=30, by=2))
+
+#call network topology analysis function
+softThres <- pickSoftThreshold(expdatOOCYTE, powerVector = powers, verbose = 5)
+
+#Plot the results to determine the best index
+par(mfrow= c(1,2), mar=c(0,4,2,0))
+#scale-free topology fit index based on the soft-thresholding power
+
+##notes on sign() function used below
+  #returns vector w/ signs of corresponding elements of x (the sign of a real             
+  #number is 1, 0, or -1 if the number is positive, zero, or negative, respectively)
+plot(softThres$fitIndices[,"Power"], -sign(softThres$fitIndices[,"slope"])*softThres$fitIndices[,"SFT.R.sq"],
+     xlab="Soft Threshold (power)",
+     ylab="Scale Free Topology Model Fit, signed R^2",
+     type="n", #"n" for no plotting
+     main="Scale Independence",
+     ylim=c(-0.6, 1.0))
+#add text
+text(softThres$fitIndices[,"Power"], -sign(softThres$fitIndices[,"slope"])*softThres$fitIndices[,"SFT.R.sq"],
+     labels=powers, cex=0.9, col="red")
+
+#h=R^2 cutoff
+abline(h=0.9, col="blue")
+abline(h=0.8, col="green")
+
+#Mean connectivity as a function of the soft-threshold power
+plot(softThres$fitIndices[,"Power"], softThres$fitIndices[,"mean.k."],
+     xlab="Soft Threshold (power)",
+     ylab="Mean Connectivity",
+     type="n",
+     main="Mean Connectivity")
+text(softThres$fitIndices[,"Power"], softThres$fitIndices[,"mean.k."], labels=powers, cex=0.9, col="red")    
+
+
+
+#See: https://horvath.genetics.ucla.edu/html/CoexpressionNetwork/Rpackages/WGCNA/faq.html for details about connectivity
+
+#Selecting a power of 4; BUT we type (i.e. oocyte vs egg are likely strong drivers for samples)
+```
+
+
+## Co-expression similarity and adjacency
+```{r sim and adjacency}
+softPower <- 4 #decided via the step above
+adjacency <- adjacency(expdatOOCYTE, power=softPower) 
+```
+
+
+## TOM-Topological Overlap Matrix
+```{r TOM}
+#to minimize effects of noise and spurious associations, transform adjacency into TOM
+TOM <- TOMsimilarity(adjacency) 
+  #Calculates Topological Overlap Matrix
+
+dissTOM <- 1-TOM
+  #calculates dissimilarity
+```
+
+
+
+## Clustering using TOM
+```{r hclustTOM, fig.height = 10, fig.width = 14}
+# Call the hierarchical clustering function
+geneTree <- hclust(as.dist(dissTOM), method = "average")
+
+# Plot the resulting clustering tree (dendrogram)
+plot(geneTree, 
+     xlab="", 
+     sub="", 
+     main = "Gene clustering on TOM-based dissimilarity",
+     labels = FALSE, 
+     hang = 0.04)
+```
+
+
+## Assigning modules and vizualize
+```{r modules, fig.height = 16, fig.width = 14}
+# Identification of the modules
+dynamicModules <- cutreeDynamic(dendro = geneTree, 
+                             distM = dissTOM,
+                             deepSplit = 2, 
+                             pamRespectsDendro = FALSE,
+                             minClusterSize = 30) #Large modules=high minimum
+#information suggests this minimum is good?
+
+table(dynamicModules) #view number of modules and genes count assigned to each
+#49 modules
+
+#convert numeric module labels to into colors
+dynamicColors <- labels2colors(dynamicModules)
+
+#plot
+plotDendroAndColors(geneTree,
+                    dynamicColors,
+                    groupLabels = "Dynamic Tree Cuts",
+                    dendroLabels = FALSE,
+                    hang=0.03,
+                    addGuide=TRUE,
+                    guideHang = 0.05,
+                    main="Gene dendrogram and module colors")
+
+```
+
+
+
+## Merge modules with very similar expression profiles
+```{r mergemodules, fig.height = 16, fig.width = 14}
+
+# Calculate eigengenes values
+ModuleEigenLs <- moduleEigengenes(expdatOOCYTE, colors = dynamicColors)
+
+#eigengenes of modules in DF form; colum corresponds to one eigengene
+#eigengene=1st principal component of a module expression matrix
+MEs <- ModuleEigenLs$eigengenes 
+
+
+# Calculate dissimilarity of module eigengenes
+MEDiss <- 1-cor(MEs, use='pairwise.complete.obs')
+MEDiss_noNA <- subset(MEDiss, select=-c(MEgrey)) #MEgrey has NaN--divided by zero
+MEDiss_noNA <- MEDiss_noNA[!(row.names(MEDiss_noNA) %in% "MEgrey"),]
+
+# Cluster module eigengenes
+  #create dist matrix based on MEDiss and then h clust
+METree <- hclust(as.dist(MEDiss_noNA), method = "average") 
+
+# Plot the result
+plot(METree,
+     main = "Clustering of module eigengenes",
+     xlab = "",
+     sub = "")
+
+
+
+##Merge Selection Threshold
+#This corresponds to a similarity of .70 to merge a module
+MEDissThres <- 0.25
+
+# Plot the cut line into the dendrogram
+abline(h=MEDissThres, col = "blue")
+
+# Call an automatic merging function
+mergeModules <- mergeCloseModules(expdatOOCYTE, dynamicColors, cutHeight = MEDissThres, verbose = 3) #cutoff of .25
+
+# The merged module colors
+mergedColors <- mergeModules$colors  #colors for .25
+
+# Eigengenes of the new merged modules:
+mergedMEs <- mergeModules$newMEs
+```
+
+
+## Vizualization: old modules vs new, merged modules
+```{r viz-newold, fig.height = 16, fig.width = 14}
+#plot new and old
+plotDendroAndColors(geneTree, 
+                    cbind(dynamicColors, mergedColors),
+                    c("Dynamic Tree Cut", "Merged dynamic 0.25"),
+                    dendroLabels = FALSE, 
+                    hang = 0.03,
+                    addGuide = TRUE, 
+                    guideHang = 0.05)
+
+```
+
+
+## Save relevant information
+```{r savemodules}
+# Rename to moduleColors
+moduleColors <- mergedColors
+
+# Construct numerical labels corresponding to the colors
+colorOrder <- c("grey", standardColors(50))
+moduleLabels <- match(moduleColors, colorOrder)-11
+
+MEs <- mergedMEs
+
+# Save module colors and labels for use in subsequent parts
+save(MEs, moduleLabels, moduleColors, geneTree, TOM, dissTOM, 
+     file = "Mrotundata_OOCYTE_step2_ModuleAssignment&Merge.RData") 
+```
+
+
+## Quantify module-variable associations
+```{r calculateP}
+# Define numbers of genes and samples
+nGenes <- ncol(expdatOOCYTE)
+nSamples <- nrow(expdatOOCYTE)
+
+#Recalculate Module Eigen with color labels
+MEs_modVar <- moduleEigengenes(expdatOOCYTE, moduleColors)$eigengenes
+
+#Reorder the eigen vectors such that more correlated ones are next to each other
+MEs <- orderMEs(MEs_modVar)
+
+#Identify significant variable associations
+#correlation=linear relationship between two variables
+
+#######Turning variables into binary values
+varData_bi <- varData[,-c(1,5)]
+
+#TX
+varData_bi$tx <- gsub("17U1", 1, varData_bi$tx)
+varData_bi$tx <- gsub("17U14", 14, varData_bi$tx)
+
+#cage
+varData_bi$cage <- gsub(9, 1, varData_bi$cage)
+varData_bi$cage <- gsub(10, 2, varData_bi$cage)
+
+
+moduleVarCor <- cor(MEs, varData_bi, use="p")
+
+#calculate pvalue given the correlation
+moduleVarPValue <- corPvalueStudent(moduleVarCor, nSamples)
+
+#Adjustment for pvalue
+nmodules <- ncol(MEs)
+nvars <- ncol(varData_bi)
+
+adj_P <- 0.05/(nmodules+nvars)
+adj_P
+```
+
+
+## Vizualizae module-variable associations
+```{r Vizualize_m-t, fig.height=12, fig.width=8}
+#Display correlations and p-values
+textMatrix <- paste(signif(moduleVarCor, 2),
+                    "\n(",
+                    signif(moduleVarPValue, 1),
+                    ")",
+                    sep = "")
+
+textMatDim <- dim(moduleVarCor)
+
+##pdf("hm_25.pdf", height = 12, width=8)
+
+par(mar=c(5,9,2,1))
+#Use heatmap to display correlation values in the heat map
+#table is color-coded according to correlation 
+labeledHeatmap(Matrix=moduleVarCor,
+               xLabels = names(varData_bi),
+               yLabels = names(MEs),
+               ySymbols = names(MEs),
+               colorLabels = FALSE,
+               colors=blueWhiteRed(40),
+               textMatrix = textMatrix,
+               setStdMargins = FALSE,
+               cex.text = 0.7,
+               zlim = c(-1,1),
+               main = "OOCYTE TISSUE: Module-variable relationships cutHeight = 0.25")
+
+#dev.off()
+```
+For significance, adjusted p-value threshold should be `adj_P`.
+
+## Experimental Factors and Significant Modules
+For each gene, we define "fuzzy" measures of module membership by correlating gene expression with module eigengene of a given module.
+
+If Module Membership (MM) for a particular module is close to 0, the gene is not part of that module.
+If MM of a particular module is  close to 1 or -1, it is highly connected to that particular module.
+Sign = positive or negative relationship
+
+### Treatment Group
+```{r tx_grouping}
+#assigning the MM can be done for all genes, irrespective of what their original module membership is
+
+# Define variable weight containing the weight column of varData_bi
+# tx per samples
+tx <- as.data.frame(varData_bi$tx)
+
+#Add column header
+names(tx) <- "tx"
+
+# names (colors) of the modules
+moduleNames <- substring(names(MEs_modVar), 3)
+
+#identifying gene module membership based on gene and Module Eigengene
+#correlation
+#0=not in that module
+#closer to 1 and -1 = highly connected to that module
+geneModuleMembership <- as.data.frame(cor(expdatOOCYTE, MEs_modVar, use = "p"))
+
+#Module Membership p-value
+#pvalue for likelihood of being in a particular module
+MMPvalue <- as.data.frame(corPvalueStudent(as.matrix(geneModuleMembership), nSamples))
+
+#adding names
+names(geneModuleMembership) <- paste("MM", moduleNames, sep="") #adding MM to module name
+names(MMPvalue) <- paste("p.MM", moduleNames, sep="")
+
+
+geneVarSignificance_tx <- as.data.frame(cor(expdatOOCYTE, tx, use = "p"))
+
+#Identifying gene significance
+#higher = more biologically relevant
+GSPvalue_tx <- as.data.frame(corPvalueStudent(as.matrix(geneVarSignificance_tx), nSamples))
+
+#Adding names
+names(geneVarSignificance_tx) <- paste("GS.", names(tx), sep="")
+names(GSPvalue_tx) <- paste("p.GS.", names(tx), sep="")
+
+print(subset(GSPvalue_tx, GSPvalue_tx$p.GS.tx < 0.01))
+
+print(subset(GSPvalue_tx, GSPvalue_tx$p.GS.tx < 0.001))
+```
+
+
+### Wave Group
+```{r wave}
+#assigning the MM can be done for all genes, irrespective of what their original module membership is
+
+# Define variable weight containing the weight column of varData_bi
+# tx per samples
+wave <- as.data.frame(varData_bi$wave)
+
+#Add column header
+names(wave) <- "wave"
+
+# names (colors) of the modules
+#moduleNames <- substring(names(MEs_modVar), 3)
+
+#identifying gene module membership based on gene and Module Eigengene
+#correlation
+#0=not in that module
+#closer to 1 and -1 = highly connected to that module
+#geneModuleMembership <- as.data.frame(cor(expdatOOCYTE, MEs_modVar, use = "p"))
+
+#Module Membership p-value
+#pvalue for likelihood of being in a particular module
+#MMPvalue <- as.data.frame(corPvalueStudent(as.matrix(geneModuleMembership), nSamples))
+
+#adding names
+#names(geneModuleMembership) <- paste("MM", moduleNames, sep="") #adding MM to module name
+#names(MMPvalue) <- paste("p.MM", moduleNames, sep="")
+
+
+geneVarSignificance_wave <- as.data.frame(cor(expdatOOCYTE, wave, use = "p"))
+
+#Identifying gene significance
+#higher = more biologically relevant
+GSPvalue_wave <- as.data.frame(corPvalueStudent(as.matrix(geneVarSignificance_wave), nSamples))
+
+#Adding names
+names(geneVarSignificance_wave) <- paste("GS.", names(wave), sep="")
+names(GSPvalue_wave) <- paste("p.GS.", names(wave), sep="")
+
+print(subset(GSPvalue_wave, GSPvalue_wave$p.GS.wave < 0.01))
+
+print(subset(GSPvalue_wave, GSPvalue_wave$p.GS.wave < 0.001))
+```
+
+#### Intramodular Analysis
+##### Grey60 Module
+```{r ModuleGSandMM, fig.height = 7, fig.width = 7, fig.align="center"}
+#asign module
+moduleofinterest1 <- "grey60"
+
+#saying get "brown" location from vector modNames
+grey60 <- match(moduleofinterest1, moduleNames)
+
+#identifying which genes fall into this module as T or F
+moduleGenes_grey60 <- moduleColors==moduleofinterest1
+
+
+par(mfrow = c(1,1))
+#scatter plot annotated with correlation, pvalue, and regression lien
+verboseScatterplot(abs(geneModuleMembership[moduleGenes_grey60, grey60]), #selects dark green only
+                   abs(geneVarSignificance_wave[moduleGenes_grey60, 1]), #selects oocyte_egg only
+                   xlab = paste("Module Membership in", moduleofinterest1, "module"),
+                   ylab = "Gene significance for Wave",
+                   main = paste("Module membership vs. gene significance\n"),
+                   cex.main = 1.2, 
+                   cex.lab = 1.2, 
+                   cex.axis = 1.2, 
+                   col = moduleofinterest1)
+```
+
+
+##### Midnight Blue
+```{r ModuleGSandMM_2, fig.height = 7, fig.width = 7, fig.align="center"}
+#asign module
+moduleofinterest2 <- "midnightblue"
+
+#saying get "brown" location from vector modNames
+midnightblue <- match(moduleofinterest2, moduleNames)
+
+#identifying which genes fall into this module as T or F
+moduleGenes_midnightblue <- moduleColors==moduleofinterest2
+
+
+par(mfrow = c(1,1))
+#scatter plot annotated with correlation, pvalue, and regression lien
+verboseScatterplot(abs(geneModuleMembership[moduleGenes_midnightblue, midnightblue]), #selects midnightblue only
+                   abs(geneVarSignificance_wave[moduleGenes_midnightblue, 1]), #selects oocyte_egg only
+                   xlab = paste("Module Membership in", moduleofinterest2, "module"),
+                   ylab = "Gene significance for Wave",
+                   main = paste("Module membership vs. gene significance\n"),
+                   cex.main = 1.2, 
+                   cex.lab = 1.2, 
+                   cex.axis = 1.2, 
+                   col = moduleofinterest2)
+```
+
+##### Violet Module
+```{r ModuleGSandMM_3, fig.height = 7, fig.width = 7, fig.align="center"}
+#asign module
+moduleofinterest3 <- "violet"
+
+#saying get "brown" location from vector modNames
+violet <- match(moduleofinterest3, moduleNames)
+
+#identifying which genes fall into this module as T or F
+moduleGenes_violet <- moduleColors==moduleofinterest3
+
+
+par(mfrow = c(1,1))
+#scatter plot annotated with correlation, pvalue, and regression lien
+verboseScatterplot(abs(geneModuleMembership[moduleGenes_violet, violet]), #selects black only
+                   abs(geneVarSignificance_wave[moduleGenes_violet, 1]), #selects oocyte_egg only
+                   xlab = paste("Module Membership in", moduleofinterest3, "module"),
+                   ylab = "Gene significance for Wave",
+                   main = paste("Module membership vs. gene significance\n"),
+                   cex.main = 1.2, 
+                   cex.lab = 1.2, 
+                   cex.axis = 1.2, 
+                   col = moduleofinterest3)
+```
+
+
+
+## Creat Gene and Module Information Dataframe
+### Make DF
+```{r geneinfodat}
+# Create the starting data frame
+geneInfo_raw <- data.frame(geneid = names(expdatOOCYTE),
+                              moduleColor = moduleColors,
+                              geneVarSignificance_tx=geneVarSignificance_tx,
+                              GSPvalue_tx= GSPvalue_tx,
+                              geneVarSignificance_wave=geneVarSignificance_wave,
+                              GSPvalue_wave= GSPvalue_wave)
+
+# Order modules by their significance for treatment group
+moduleOrder <- order(-abs(cor(MEs, tx, use = "p")))
+
+# Add module membership information in the chosen order
+for (module in 1:ncol(geneModuleMembership))
+{
+  oldNames <- names(geneInfo_raw)
+  geneInfo_raw <- data.frame(geneInfo_raw, geneModuleMembership[, moduleOrder[module]], MMPvalue[, moduleOrder[module]]);
+  names(geneInfo_raw) <- c(oldNames, paste("MM.", moduleNames[moduleOrder[module]], sep=""), paste("p.MM.", moduleNames[moduleOrder[module]], sep=""))
+}
+
+
+# Order the genes in the geneInfo variable first by module color, then by geneVarSignificance
+geneOrder <- order(geneInfo_raw$moduleColor, -abs(geneInfo_raw$GS.tx));
+geneInfo_OOCYTE = geneInfo_raw[geneOrder, ]
+
+```
+
+### Module Frequencies
+```{r module counts graph, fig.height=10, fig.width=8}
+
+modulecounts <- count(geneInfo_OOCYTE, 'moduleColor')
+
+modulecounts_ordered <- modulecounts[order(-modulecounts$freq),]
+
+par(mgp=c(1,1,0), mar=c(2.5,8.5,0,1))
+barplot2(modulecounts_ordered$freq, horiz = TRUE, names.arg = 
+           modulecounts_ordered$moduleColor, cex.axis = 1, cex.names = 1, las=1, 
+           col=modulecounts_ordered$moduleColor, xlim = c(0,5000), xaxt="n")
+axis(1, pos=0, at = seq(0,5000,500)) # Draw x-axis at 0 line
+mtext(text = "Module Assignment", side = 2, line = 7, cex = 1.4)
+mtext(text = "Gene Frequency", side = 1, line = 1, cex = 1.4)
+
+```
+
+
+
+## Write Gene Information to csv
+```{r geneinfo_CSV}
+# Save module colors and labels for use in subsequent parts
+save(geneModuleMembership, geneVarSignificance_tx, geneVarSignificance_wave, GSPvalue_tx, GSPvalue_wave, wave, tx, file = "Mrotundata_OOCYTE_step3_ModuleMembership&GeneInfoID.RData")
+
+
+
+write.csv(geneInfo_OOCYTE, file = "geneInfo_OOCYTE.csv")
+```
+
+
+## Saving RData for Module Overlap
+```{r rdata_moduleoverlap}
+###RENAME FILES CONTAINING THE OOCYTE LABEL###
+#Makes life easier for module overlap loadin
+geneModuleMembership_OOCYTE <- geneModuleMembership
+MEs_OOCYTE <- MEs
+moduleColors_OOCYTE <- moduleColors
+moduleLabels_OOCYTE <- moduleLabels
+
+
+# Save module colors and labels for use in subsequent parts
+save(geneModuleMembership_OOCYTE,moduleColors_OOCYTE, moduleLabels_OOCYTE, MEs_OOCYTE, file = "Mrotundata_OOCYTE_ModuleOverlapData.RData")
+```

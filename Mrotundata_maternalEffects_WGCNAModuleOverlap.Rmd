@@ -1,0 +1,432 @@
+---
+title: "Maternal Effects_Module Overlap"
+author: "M.A. Hagadorn"
+date: "`r format(Sys.time(), '%B %d, %Y')`"
+output: pdf_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = TRUE,
+	warning = TRUE,
+	background = "#F7F7F7",
+	highlight = TRUE,
+	tidy.opts = list(width.cutoff = 60), tidy = TRUE)
+```
+
+# Step One: Preparing for Analysis
+```{r loadpackages, warning=FALSE, echo=FALSE, message=FALSE, include=FALSE}
+#Library Necessary Packages
+library(formatR)
+library(flashClust)
+library(DESeq2) 
+library(gplots) 
+library(ggplot2)
+library(RColorBrewer)
+library(affycoretools)
+library(genefilter)
+library(plotrix)
+library(reshape2)
+library(vegan)
+library(adegenet)
+library(stringr)
+library(knitr)
+library(WGCNA)
+library(plyr)
+library(dplyr)
+library(eulerr)
+library(cowplot)
+library(ggplot2)
+library(gridExtra)
+options(stringsAsFactors = FALSE)
+
+```
+
+```{r sessioninformation, echo=FALSE}
+installed.packages()[names(sessionInfo()$otherPkgs), "Version"]
+
+```
+
+## Load in RData Files containing necessary files
+```{r loadintissueData}
+
+###EGG DATA###
+load(file = "../Mrotundata_EGG_ModuleOverlapData.RData")
+
+###OOCTYE DATA###
+load(file = "../Mrotundata_OOCYTE_ModuleOverlapData.RData")
+
+```
+
+
+## Match Labels
+```{r matchlabels}
+matchedLabels_EGG <- matchLabels(reference = moduleColors_OOCYTE, source = moduleColors_EGG)
+
+#matching labels for egg to the reference(in this case) to oocyte.
+#https://www.rdocumentation.org/packages/WGCNA/versions/1.70-3/topics/matchLabels
+#The function calculates the overlap of the source and reference modules using Fisher's exact test. It then attempts to relabel source modules such that each source module gets the label of the reference module that it overlaps most with, subject to not renaming two source modules to the same reference module. (If two source modules point to the same reference module, the one with the more significant overlap is chosen.)
+
+
+oldnew <- data.frame(Oocyte= moduleColors_OOCYTE, old=moduleColors_EGG, new=matchedLabels_EGG)
+rownames(oldnew) <- rownames(geneModuleMembership_OOCYTE)
+write.table(oldnew, file="ModuleAssignment_OldNewNaming.csv", quote=F, sep=",", 
+            row.names=TRUE, col.names=NA)
+
+oldnew_t <- t(oldnew)
+```
+
+
+
+
+# Step Two: Module Overlap
+## Overlap
+```{r moduleoverlap}
+#With Matched Lables
+overlapTable1 <- overlapTable(labels1 = moduleColors_OOCYTE, labels2 = matchedLabels_EGG)
+    #returns a list of components
+    #$countTable=a matrix whose rows correspond to modules (unique labels) in lables1 and whose columns correspond to 
+                #modules (unique label) in labels 2 --> Gives the number of objects intersecting the two modules
+
+    #$pTable = a matrix whose rows correspond to modules (unique labels) for labels1 and columns correspond to modules 
+              #(unique labels) in labels2 --> fishers exact test pvalues for overlat of the two modules
+
+
+write.table(as.data.frame(overlapTable1$countTable), file="OverlapTableMatched_Count.csv", quote=F, sep=",", 
+            row.names=TRUE, col.names=NA)
+
+
+
+write.table(as.data.frame(overlapTable1$pTable), file="OverlapTableMatched_P.csv", quote=F, sep=",", 
+            row.names=TRUE, col.names=NA)
+
+```
+
+
+## Assess Overlap for modules of interest
+```{r assessmoduleoverlap}
+OVERLAP_count <- as.data.frame(overlapTable1$countTable)
+OVERLAP_P <- as.data.frame(overlapTable1$pTable)
+
+##EGG modules with significant overlap of oocyte modules of interest
+#grey60
+ModOvl_grey60 <- names(OVERLAP_P)[which(OVERLAP_P["grey60",] < 0.05)]
+grey60_count <- t(OVERLAP_count["grey60", ModOvl_grey60])
+grey60_P <- t(OVERLAP_P["grey60", ModOvl_grey60])
+grey60 <- cbind(grey60_count, grey60_P)
+colnames(grey60) <- c("OL_count", "OL_pValue")
+
+kable(grey60, caption = "Oocyte 'grey60' module overlap with label matched Egg modules")
+
+#midnightblue
+ModOvl_midblue <- names(OVERLAP_P)[which(OVERLAP_P["midnightblue",] < 0.05)]
+midblue_count <- t(OVERLAP_count["midnightblue", ModOvl_midblue])
+midblue_P <- t(OVERLAP_P["midnightblue", ModOvl_midblue])
+midblue <- cbind(midblue_count, midblue_P)
+colnames(midblue) <- c("OL_count", "OL_pValue")
+
+kable(midblue, caption = "Oocyte 'midnightblue' module overlap with label matched Egg modules")
+
+#violet
+ModOvl_violet <-names(OVERLAP_P)[which(OVERLAP_P["violet",] < 0.05)]
+violet_count <- t(OVERLAP_count["violet", ModOvl_violet])
+violet_P <- t(OVERLAP_P["violet", ModOvl_violet])
+violet <- cbind(violet_count, format(round(violet_P, 14), nsmall = 14))
+colnames(violet) <- c("OL_count", "OL_pValue")
+rownames(violet) <- ModOvl_violet
+
+kable(violet , caption = "Oocyte 'violet' module overlap with label matched Egg modules")
+
+
+#darkturquoise
+ModOvl_darkturquoise <-names(OVERLAP_P)[which(OVERLAP_P["darkturquoise",] < 0.05)]
+darkturquoise_count <- t(OVERLAP_count["darkturquoise", ModOvl_darkturquoise])
+darkturquoise_P <- t(OVERLAP_P["darkturquoise", ModOvl_darkturquoise])
+darkturquoise <- cbind(darkturquoise_count, format(round(darkturquoise_P, 14), nsmall = 14))
+colnames(darkturquoise) <- c("OL_count", "OL_pValue")
+rownames(darkturquoise) <- ModOvl_darkturquoise
+
+kable(darkturquoise, caption = "Oocyte 'darkturquoise' module overlap with label matched Egg modules")
+
+
+
+columnnamesEGG <- c(ModOvl_grey60, "darkgrey", "orange", "blue","darkturquoise","royalblue")
+
+#Empty dataframe
+ModofInterest_overlap_OOCYTE <- data.frame(matrix("", ncol=9, nrow=4))
+#assign col and row names
+rownames(ModofInterest_overlap_OOCYTE) <- c("grey60","midnightblue","violet", "darkturquoise")
+colnames(ModofInterest_overlap_OOCYTE) <- columnnamesEGG
+#Add specific data points
+ModofInterest_overlap_OOCYTE[1,1:4] <- grey60_count
+ModofInterest_overlap_OOCYTE[2,c(5,3,4,6)] <- midblue_count
+ModofInterest_overlap_OOCYTE[3,3] <- violet_count
+ModofInterest_overlap_OOCYTE[4,7:9] <- darkturquoise_count
+
+kable(ModofInterest_overlap_OOCYTE, caption = "Overlap of four modules of interest from the Oocyte data set and the corresponding egg modules (labels matched) that they show significant overlap with")
+```
+
+## Pull old labels for correlation comparison
+Here, we pull out the old names of the egg modules that have significant overlap with oocyte modules. We are doing this to assess the correlation of these modules with photoperiod
+```{r matcholdnameswithnew}
+##Egg modules
+#Grey60
+head(oldnew[which(oldnew$new == "grey60"),2], 1)
+
+#LightSteelBlue1
+head(oldnew[which(oldnew$new == "lightsteelblue1"),2], 1)
+
+#MidnightBlue
+head(oldnew[which(oldnew$new == "midnightblue"),2], 1)
+
+#cyan
+head(oldnew[which(oldnew$new == "cyan"),2], 1)
+
+#DarkGrey
+head(oldnew[which(oldnew$new == "darkgrey"),2], 1)
+
+#orange
+head(oldnew[which(oldnew$new == "orange"),2], 1)
+
+#darkturquoise
+head(oldnew[which(oldnew$new == "darkturquoise"),2], 1)
+
+#Blue
+head(oldnew[which(oldnew$new == "blue"),2], 1)
+
+#royalblue
+head(oldnew[which(oldnew$new == "royalblue"),2], 1)
+```
+
+
+
+## Calculating Representation Factor (RF) for overlap
+Calculating Representation factors for the Modules with significant overlap.
+
+Representation factor = x/E; E = (n*D)/N
+
+```{r RF}
+let <- c("x", "E", " ", "n", "D", "N")
+def <- c("# of genes in common between two lists", "Expected # of shared genes", " ", "# of genes in list 1", "# of genes in list 2", "total number of genes")
+
+tab <- cbind(let, def)
+
+library(knitr)
+kable(tab, col.names = c("Variable", "Definition"))
+
+
+#Make a function to calculate RF
+RF <- function(n, D, x, GROUP){
+  #calculate Expected first
+  N <- length(rownames(oldnew))
+  E <- (n*D)/N
+  
+  #calculate overlap
+  RF <- x/E
+  print(paste("The RF of", GROUP, "=", round(RF, digits=3)))
+  return(RF)
+}
+
+#OOCYTE--GREY60
+#Grey60 vs Grey60
+G60.G60 <- RF(length(which(oldnew$Oocyte=="grey60")), 
+              length(which(oldnew$new=="grey60")), 
+              grey60[rownames(grey60) %in% "grey60",1], 
+              "Grey60 & Grey60")
+
+#Grey60 vs LightSteelBlue1
+G60.LSB1 <- RF(length(which(oldnew$Oocyte=="grey60")), 
+               length(which(oldnew$new=="lightsteelblue1")), 
+               grey60[rownames(grey60) %in% "lightsteelblue1",1], 
+               "Grey60 & LightSteelBlue1")
+
+#Grey60 vs MidnightBlue
+G60.MB <- RF(length(which(oldnew$Oocyte=="grey60")), 
+               length(which(oldnew$new=="midnightblue")),
+               grey60[rownames(grey60) %in% "midnightblue",1], 
+             "Grey60 & MidnightBlue")
+
+#Grey60 vs Cyan
+G60.cyan <- RF(length(which(oldnew$Oocyte=="grey60")), 
+               length(which(oldnew$new=="cyan")),
+               grey60[rownames(grey60) %in% "cyan",1], 
+               "Grey60 & Cyan")
+
+
+
+#OOCYTE--MidnightBlue
+#MidnightBlue & DarkGrey
+MB.DG <- RF(length(which(oldnew$Oocyte=="midnightblue")), 
+               length(which(oldnew$new=="darkgrey")),
+               midblue[rownames(midblue) %in% "darkgrey",1], 
+            "MidnightBlue & DarkGrey")
+
+#MidnightBlue & LightSteelBlue1
+MB.LSB1 <- RF(length(which(oldnew$Oocyte=="midnightblue")), 
+               length(which(oldnew$new=="lightsteelblue1")),
+               midblue[rownames(midblue) %in% "lightsteelblue1",1], 
+              "MidnightBlue & LightSteelBlue1")
+
+#MidnightBlue & MidnightBlue
+MB.LSB1 <- RF(length(which(oldnew$Oocyte=="midnightblue")), 
+               length(which(oldnew$new=="midnightblue")),
+               midblue[rownames(midblue) %in% "midnightblue",1], 
+              "MidnightBlue & MidnightBlue")
+
+#MidnightBlue & Orange
+MB.OG <- RF(length(which(oldnew$Oocyte=="midnightblue")), 
+               length(which(oldnew$new=="orange")),
+               midblue[rownames(midblue) %in% "orange",1], 
+            "MidnightBlue & Orange")
+
+
+
+#OOCYTE--Violet
+#MidnightBlue & Violet
+VI.LSB1 <- RF(length(which(oldnew$Oocyte=="violet")), 
+               length(which(oldnew$new=="lightsteelblue1")),
+               as.numeric(noquote(violet[rownames( violet) %in% "lightsteelblue1",1])), 
+              "Violet & LightSteelBlue1")
+
+
+#OOCYTE--DarlTurquoise
+#DarkTurquoise vs DarkTurquoise
+DT.DT <- RF(length(which(oldnew$Oocyte=="darkturquoise")), 
+               length(which(oldnew$new=="darkturquoise")),
+               as.numeric(noquote(darkturquoise[rownames(darkturquoise) %in% "darkturquoise",1])),
+                          "DarkTurquoise & DarkTurquoise")
+
+
+#DarkTurquoise vs DarkTurquoise
+DT.BL <- RF(length(which(oldnew$Oocyte=="darkturquoise")), 
+               length(which(oldnew$new=="blue")),
+               as.numeric(noquote(darkturquoise[rownames(darkturquoise) %in% "blue",1])),
+                          "DarkTurquoise & Blue")
+
+DT.RB <- RF(length(which(oldnew$Oocyte=="darkturquoise")), 
+               length(which(oldnew$new=="royalblue")),
+               as.numeric(noquote(darkturquoise[rownames(darkturquoise) %in% "royalblue",1])),
+                          "DarkTurquoise & RoyalBlue")
+
+```
+
+
+## Proportion overlap of oocyte module and egg module
+```{r overlap}
+
+#Grey60 vs #Grey60
+#Overlap prop with oocyte
+grey60["grey60",1]/length(which(oldnew$Oocyte=="grey60"))
+#Overlap prop with egg
+grey60["grey60",1]/length(which(oldnew$new=="grey60"))
+
+#Grey60 vs LightSteelBlue1
+#Overlap prop with oocyte
+grey60["lightsteelblue1",1]/length(which(oldnew$Oocyte=="grey60"))
+#Overlap prop with egg
+grey60["lightsteelblue1",1]/length(which(oldnew$new=="lightsteelblue1"))
+
+
+#Grey60 vs MidnightBlue
+#Overlap prop with oocyte
+grey60["midnightblue",1]/length(which(oldnew$Oocyte=="grey60"))
+#Overlap prop with egg
+grey60["midnightblue",1]/length(which(oldnew$new=="midnightblue"))
+
+#Grey60 vs Cyan
+#Overlap prop with oocyte
+grey60["cyan",1]/length(which(oldnew$Oocyte=="grey60"))
+#Overlap prop with egg
+grey60["cyan",1]/length(which(oldnew$new=="cyan"))
+
+
+#OOCYTE--MidnightBlue
+#MidnightBlue & DarkGrey
+#Overlap prop with oocyte
+midblue["darkgrey",1]/length(which(oldnew$Oocyte=="midnightblue"))
+#Overlap prop with egg
+midblue["darkgrey",1]/length(which(oldnew$new=="darkgrey"))
+
+#MidnightBlue & LightSteelBlue1
+#Overlap prop with oocyte
+midblue["lightsteelblue1",1]/length(which(oldnew$Oocyte=="midnightblue"))
+#Overlap prop with egg
+midblue["lightsteelblue1",1]/length(which(oldnew$new=="lightsteelblue1"))
+
+#MidnightBlue & MidnightBlue
+#Overlap prop with oocyte
+midblue["midnightblue",1]/length(which(oldnew$Oocyte=="midnightblue"))
+#Overlap prop with egg
+midblue["midnightblue",1]/length(which(oldnew$new=="midnightblue"))
+
+#MidnightBlue & Orange
+#Overlap prop with oocyte
+midblue["orange",1]/length(which(oldnew$Oocyte=="midnightblue"))
+#Overlap prop with egg
+midblue["orange",1]/length(which(oldnew$new=="orange"))
+
+
+
+#OOCYTE--Violet
+#Violet & LightSteelBlue1
+#Overlap prop with oocyte
+as.numeric(violet["lightsteelblue1",1])/length(which(oldnew$Oocyte=="violet"))
+#Overlap prop with egg
+as.numeric(violet["lightsteelblue1",1])/length(which(oldnew$new=="lightsteelblue1"))
+
+
+#OOCYTE--DarkTurquoise
+#DarkTurquoise vs DarkTurquoise
+#Overlap prop with oocyte
+as.numeric(darkturquoise["darkturquoise",1])/length(which(oldnew$Oocyte=="darkturquoise"))
+#Overlap prop with egg
+as.numeric(darkturquoise["darkturquoise",1])/length(which(oldnew$new=="darkturquoise"))
+
+
+#DarkTurquoise vs Blue
+#Overlap prop with oocyte
+as.numeric(darkturquoise["blue",1])/length(which(oldnew$Oocyte=="darkturquoise"))
+#Overlap prop with egg
+as.numeric(darkturquoise["blue",1])/length(which(oldnew$new=="blue"))
+
+#DarkTurquoise vs Roya1Blue
+#Overlap prop with oocyte
+as.numeric(darkturquoise["royalblue",1])/length(which(oldnew$Oocyte=="darkturquoise"))
+#Overlap prop with egg
+as.numeric(darkturquoise["royalblue",1])/length(which(oldnew$new=="royalblue"))
+```
+
+
+
+
+
+## Proportion overlap of oocyte module with all genes of significantly overlapped Egg modules
+```{r overlap_ALL}
+
+#Grey60
+sum(grey60[,1])/length(which(oldnew$Oocyte=="grey60"))
+
+#MidnightBlue
+sum(midblue[,1])/length(which(oldnew$Oocyte=="midnightblue"))
+
+#Violet
+sum(as.numeric(violet[,1]))/length(which(oldnew$Oocyte=="violet"))
+
+#DarkTurquoise
+sum(as.numeric(darkturquoise[,1]))/length(which(oldnew$Oocyte=="darkturquoise"))
+
+```
+```{r save}
+ModofInterest_overlap_OOCYTE_numericoocytemoduleid <- ModofInterest_overlap_OOCYTE
+rownames(ModofInterest_overlap_OOCYTE_numericoocytemoduleid) <- c("oocyteMod16", "oocyteMod4", "oocyteMod29", "oocyteMod20")
+colnames(ModofInterest_overlap_OOCYTE_numericoocytemoduleid) <- c("eggMod20", "eggMod25", "eggMod4", "eggMod17", "eggMod13", "eggMod15", "eggMod5", "eggMod24", "eggMod23")
+
+write.table(ModofInterest_overlap_OOCYTE_numericoocytemoduleid, "G:/DesktopDocuments/Documents/PHD/Manuscripts/Bee/Mrot_MaternalEffects/WGCNA/MRot_WGCNA/ModuleOverlap/OverlapTables/ModofInterest_overlapwithOOCYTE_numericmoduleid.csv", sep=",", col.names = TRUE, row.names=TRUE)
+
+write.table(ModofInterest_overlap_OOCYTE, "G:/DesktopDocuments/Documents/PHD/Manuscripts/Bee/Mrot_MaternalEffects/WGCNA/MRot_WGCNA/ModuleOverlap/OverlapTables/ModofInterest_overlapwithOOCYTE_originalnamingbycolors.csv", sep=",", col.names = TRUE, row.names=TRUE)
+
+save(ModofInterest_overlap_OOCYTE, oldnew, overlapTable1, ModofInterest_overlap_OOCYTE_numericoocytemoduleid, ModofInterest_overlap_OOCYTE_numericoocytemoduleid, file = "Mrotundata_BuildEulerPlotInformation")
+
+```

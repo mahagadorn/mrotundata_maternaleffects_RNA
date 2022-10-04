@@ -1,0 +1,206 @@
+#SNAKEFILE
+#Created 9.30.22
+#Last edited 9.30.22
+
+#description: below is the snakefile for finding a list of reciprocal best hits and then counting how many are shared between species as being related to diapause in some way. 
+#In this case, the blast database for mrot are made from proteins and the other species is made from nucleotides
+
+#Need to define below with the path
+###USER INPUT####
+species1="mrot"
+species2=#species 2 
+project_path=#the path to the project
+original_files=#path to the original files
+reciprocal_blasts=#path to reciprocal blast folder
+genesofint= #path to genes of interest for mrot
+DEGSsp2= #this is the list of the genes that were significantly differentially expressed in the 2nd species. 
+#####End INPUT###
+rule all:
+        input:original_files+species1+".fasta",
+              original_files+species2+".fasta",
+              original_files+species1+".fasta.pdb",
+              original_files+species2+".fasta.ndb",
+              original_files+"blastt_"+species1+"_"+species2,
+              original_files+"blastt_"+species2+"_"+species1,
+              reciprocal_blasts+"blastt_"+species2+"_"+species1,
+              reciprocal_blasts+"blastt_"+species1+"_"+species2,
+              reciprocal_blasts+"blast_RBH.txt",
+              genesofint+species1+"ofint_momtrt.csv",
+              genesofint+species1+"ofint_photo.csv",
+              genesofint+DEGSsp2,
+              genesofint+"filtered_"+species2+"_nodups.txt",
+              genesofint+"filtered_"+species2+"_"+species1+"ofintmomtrt.csv",
+              genesofint+"filtered_"+species2+"_"+species1+"ofintphoto_nodups.csv",
+              genesofint+"filteredmrot_trt",
+              genesofint+"filteredmrot_photo_nodups.txt"
+
+
+
+
+###below rule is for making a protein to protein database comparison 
+rule blast_databases:
+        input: original_files+species1+".fasta"
+        output: original_files+species1+".fasta.pdb",
+                original_files+species2+".fasta.ndb"
+        resources: mem_mb=lambda wildcards,  attempt: (1000*attempt)
+        params: cpu=1,
+                samples1=species1+".fasta",
+                samples2=species2+".fasta",
+                input_path=original_files
+        shell:"""
+              cd {params.input_path}
+              module load blast
+              makeblastdb -in {params.samples1} -dbtype prot -parse_seqids
+              makeblastdb -in {params.samples2} -dbtype nucl -parse_seqids
+              """
+
+
+#this rule is for comparing the mrot to other species 
+
+rule blast_sp1_sp2:
+        input: sp1=original_files+"mrot.fasta",
+               sp2=original_files+species2+".fasta"
+        output:original_files+"blastt_"+species1+"_"+species2
+        resources: mem_mb=lambda wildcards,  attempt: (1000*attempt)
+        params: cpu=2,
+                input_path=original_files
+        shell:"""
+              cd {params.input_path}
+              module load blast
+              tblastn -query {input.sp1}\
+              -db {input.sp2} -out {output}\
+              -evalue 10e-5 -outfmt 7 -max_target_seqs 1 \
+              -num_threads 16
+              """
+
+#this rule is for comparing the other species to mrot 
+
+rule blast_sp2_sp1:
+        input: sp1=original_files+species1+".fasta",
+               sp2=original_files+species2+".fasta"
+        output:original_files+"blastt_"+species2+"_"+species1
+        resources: mem_mb=lambda wildcards,  attempt: (1000*attempt)
+        params: cpu=1,
+                input_path=original_files
+        shell:"""
+              cd {params.input_path}
+              module load blast
+              blastx -query {input.sp2}\
+              -db {input.sp1} -out {output}\
+              -evalue 10e-5 -outfmt 7 -max_target_seqs 1 \
+              -num_threads 16
+              """
+
+#This rule just copies the above outputs to a new folder for further manipulation
+rule copy_blasts:
+        input: sp1=original_files+"blastt_"+species2+"_"+species1,
+               sp2=original_files+"blastt_"+species1+"_"+species2
+        output: reciprocal_blasts+"blastt_"+species1+"_"+species2,
+                reciprocal_blasts+"blastt_"+species2+"_"+species1
+        resources: mem_mb=lambda wildcards,  attempt: (1000*attempt)
+        params: cpu=1,
+                input_path=original_files,
+                output_path=reciprocal_blasts
+        shell:"""
+              cd {params.input_path}
+              cp {input.sp1} {params.output_path}
+              cp {input.sp2} {params.output_path}
+              """
+
+#This rule compares both blast comparisons and only prints ones where they match each other as best hits. 
+#It does however, print duplicates. See note below.
+rule reciprocal_blast:
+        input: in1=reciprocal_blasts+"blastt_"+species1+"_"+species2,
+               in2=reciprocal_blasts+"blastt_"+species2+"_"+species1
+        output: reciprocal_blasts+"blast_RBH.txt"
+        resources: mem_mb=lambda wildcards,  attempt: (1000*attempt)
+        params: cpu=2,
+                input_path=reciprocal_blasts,
+                outFileRBH="blast_RBH.txt"
+        shell:"""
+              cd {params.input_path}
+              echo "queryHit,dbHit" > {params.outFileRBH}
+              echo "Recording RBH..."
+              while IFS=$'\t' read -r f1 f2 f3 f4 f5 f6 f7 f8 f9 f10 f11 f12
+              do
+              if grep -q "$f2"$'\t'"$f1"$'\t' {input.in1}; then
+              echo "$f1,$f2" >> {params.outFileRBH}
+              fi
+              done < {input.in2}
+              echo "Finished recording RBH!"
+              """
+#Duplicates are present in above file, these can either be removed or removed in the output below. 
+
+#this rule is to pull out which of the sp2 genes are similar to the DEGs in one of the mrot treatments
+rule filtersp1_trt:
+        input: in1=genesofint+species1+"ofint_momtrt.csv",
+               in2=reciprocal_blasts+"blast_RBH.txt"
+        output: genesofint+"filteredmrot_trt_nodups.txt"
+        resources: mem_mb=lambda wildcards,  attempt: (1000*attempt)
+        params: cpu=1,
+                input_path=genesofint,
+                names_s1trt=genesofint+"names_s1trt"
+        shell:"""
+              cd {params.input_path}
+              awk -F ',' '{{print $1}}' {input.in1} > names_s1trt
+              awk -F ',' 'NR==FNR{{F1[$0];next}}$2 in F1{{print}}' {params.names_s1trt} {input.in2} | sort -u > {output}
+              """
+
+#This rule is to pull out which of the sp2 genes are similar to the DEGs in the other mrot treatment
+rule filtersp1_photo:
+        input: gofint_photo=genesofint+species1+"ofint_photo.csv",
+               blast_RBH=reciprocal_blasts+"blast_RBH.txt"
+        output: genesofint+"filteredmrot_photo_nodups.txt"
+        resources: mem_mb=lambda wildcards,  attempt: (1000*attempt)
+        params: cpu=1,
+                input_path=genesofint,
+                names_s1photo=genesofint+"names_s1photo"
+        shell:"""
+              cd {params.input_path}
+              awk -F ',' '{{print $1}}' {input.gofint_photo} > names_s1photo
+              awk -F ',' 'NR==FNR{{F1[$0];next}}$2 in F1{{print}}' {params.names_s1photo} {input.blast_RBH} | sort -u > {output}
+              """
+
+#as each of our other species only had 1 treatment to keep track of, this is the rule to pull out which of the mrot genes were found to be 
+#reciprocal best hits with the genes of interest for species 2
+rule filtersp2:
+        input: gofint=genesofint+species2+"ofint.csv",
+               blast_RBH=reciprocal_blasts+"blast_RBH.txt"
+        output: genesofint+"filtered_"+species2+"_nodups.txt"
+        resources: mem_mb=lambda wildcards,  attempt: (1000*attempt)
+        params: cpu=1,
+                input_path=genesofint,
+                names=genesofint+"names"
+        shell:"""
+              cd {params.input_path}
+              awk -F ',' '{{print $1}}' {input.gofint} > names
+              awk -F ',' 'NR==FNR{{F1[$0];next}}$1 in F1{{print}}' {params.names} {input.blast_RBH} | sort -u > {output}
+              """
+
+#This rules was to find out which genes are shared between the sp2 treatment list and the mrot 1st trt list
+rule filtersp2_1_trt1:
+        input: sp2=genesofint+"filtered_"+species2+"_nodups.txt",
+               sp1trt=genesofint+species1+"ofint_momtrt.csv"
+        output: genesofint+"filtered_"+species2+"_"+species1+"ofintmomtrt.csv"
+        resources: mem_mb=lambda wildcards,  attempt: (1000*attempt)
+        params: cpu=1,
+                input_path=genesofint
+        shell:"""
+              cd {params.input_path}
+              awk -F ',' 'NR==FNR{{F1[$1];next}}$2 in F1{{print}}' {input.sp1trt} {input.sp2} > {output}
+              """
+
+#This rules was to find out which genes are shared between the sp2 treatment list and the mrot 2nd trt list
+rule filtersp2_1_trt2:
+        input: sp2=genesofint+"filtered_"+species2+"_nodups.txt",
+               sp1trt=genesofint+species1+"ofint_photo.csv"
+        output: genesofint+"filtered_"+species2+"_"+species1+"ofintphoto_nodups.csv"
+        resources: mem_mb=lambda wildcards,  attempt: (1000*attempt)
+        params: cpu=1,
+                input_path=genesofint
+        shell:"""
+              cd {params.input_path}
+              awk -F ',' 'NR==FNR{{F1[$1];next}}$2 in F1{{print}}' {input.sp1trt} {input.sp2} | sort-u > {output}
+              """
+
+#resulting files I counted lines in order to get values for the RF and phyper tests. 

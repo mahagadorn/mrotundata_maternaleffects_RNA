@@ -1,0 +1,416 @@
+---
+title: 'Megachile rotundata: maternal RNA DEGs and GO Analysis_updated annotations'
+author: "M.A. Hagadorn"
+date: "`r format(Sys.time(), '%B %d, %Y')`"
+output:
+  pdf_document:
+    toc: true
+    toc_depth: 3
+editor_options: 
+  chunk_output_type: console
+---
+
+# Load in Gene Data
+```{r loadpackages, warning=FALSE, echo=FALSE, message=FALSE, include=FALSE}
+#Library Necessary Packages
+library(tidyverse)
+library(lattice)
+library(lintr)
+library(AnnotationDbi)
+library(topGO)
+library(rrvgo)
+library(org.Dm.eg.db)
+options(stringsAsFactors = FALSE)
+
+```
+
+```{r sessioninformation, echo=FALSE}
+installed.packages()[names(sessionInfo()$otherPkgs), "Version"]
+
+```
+
+#OOCYTE
+## Oocyte: photoperiod
+```{r LoadinGeneData, echo=FALSE}
+DEGlist <- read.csv2(file = "../DEGlist/DEGData/deg_oocyte_wave2v1.csv", header=TRUE, sep=",")
+rownames(DEGlist) <- DEGlist$X
+DEGlist <- DEGlist[,-1]
+
+```
+
+
+## GO Enrichment Analysis
+I'm using the following resource to work through the GO analysis.
+https://bioconductor.org/packages/release/bioc/vignettes/topGO/inst/doc/topGO.pdf
+
+### Data preparation
+
+#### Read in GO annotations
+```{r readinannotation}
+#read in the GO annotation file for mrot
+#updated annotation on 8/10/2022 by MAH
+gene2mapping <- readMappings("../../GOAnnotation/mrotundata_GOannotations_aug2022_pfamSFpant_topgoready.txt", sep = " ", IDsep=",")
+```
+
+
+### 'Universe' Gene List
+```{r allgeneslist}
+#List of all genes
+geneUniverse <- rownames(DEGlist) #give list of all gene names
+```
+
+###'Gene' list for DEGs
+```{r degsgeneslist}
+#gene list for topgo input
+DEG.genelist <- as.numeric(DEGlist$adj.P.Val)
+names(DEG.genelist) <- geneUniverse
+```
+
+
+#### Build GoData object
+Using the following resource as a guide: https://ucdavis-bioinformatics-training.github.io/2018-June-RNA-Seq-Workshop/friday/enrichment.html
+
+
+```{r geneSel.fun}
+#function that returns genes < 0.1 adj pvalue
+topDiffGenes <- function(allScore){
+  return(allScore < 0.1)
+}
+```
+
+
+##### BP
+```{r BP_DEG}
+DEgenes.GO.bp <- new("topGOdata",
+                description = paste("DEG Go", "BP", sep = "_"), 
+                ontology = "BP",
+                allGenes = DEG.genelist, # all genes in the "universe" aka our experiment
+                geneSel = topDiffGenes,
+                gene2GO = gene2mapping,
+                annot = annFUN.gene2GO)
+
+
+#Kolmogorov-Smirnov testing
+DEG.bp_resultKS <- runTest(DEgenes.GO.bp, statistic = "ks")
+DEG.bp_resultKS 
+
+DEG_BP.table <- GenTable(DEgenes.GO.bp, raw.p.value = DEG.bp_resultKS , topNodes = 
+                              length(DEG.bp_resultKS@score), numChar = 120)
+
+write.csv(DEG_BP.table, "Oocyte_Photoperiod/OocyteDEGforPhotoperiod_BPTerms.csv")
+```
+
+##### MF
+```{r mf_DEG}
+DEgenes.GO.mf <- new("topGOdata",
+                description = paste("DEG Go", "MF", sep = "_"), 
+                ontology = "MF",
+                allGenes = DEG.genelist, # all genes in the "universe" aka our experiment
+                geneSel = topDiffGenes,
+                gene2GO = gene2mapping,
+                annot = annFUN.gene2GO)
+
+
+
+#Kolmogorov-Smirnov testing
+DEG.mf_resultKS <- runTest(DEgenes.GO.mf, statistic = "ks")
+DEG.mf_resultKS 
+
+DEG_MF.table <- GenTable(DEgenes.GO.mf, raw.p.value = DEG.mf_resultKS , topNodes = 
+                              length(DEG.mf_resultKS@score), numChar = 120)
+
+write.csv(DEG_MF.table, "Oocyte_Photoperiod/OocyteDEGforPhotoperiod_MFTerms.csv")
+```
+
+
+
+##### CC
+```{r cc_DEG}
+
+DEgenes.GO.cc <- new("topGOdata",
+                description = paste("DEG Go", "CC", sep = "_"), 
+                ontology = "CC",
+                allGenes = DEG.genelist, # all genes in the "universe" aka our experiment
+                geneSel = topDiffGenes,
+                gene2GO = gene2mapping,
+                annot = annFUN.gene2GO)
+
+
+
+#Kolmogorov-Smirnov testing
+DEG.cc_resultKS <- runTest(DEgenes.GO.cc, statistic = "ks")
+DEG.cc_resultKS 
+
+DEG_CC.table <- GenTable(DEgenes.GO.cc, raw.p.value = DEG.cc_resultKS , topNodes = 
+                              length(DEG.cc_resultKS@score), numChar = 120)
+
+write.csv(DEG_CC.table, "Oocyte_Photoperiod/OocyteDEGforPhotoperiod_CCTerms.csv")
+```
+
+
+```{r largetable.DEG_Node=1}
+DEG_BP.table <- cbind(DEG_BP.table, ontology=rep("BP", length(DEG_BP.table$GO.ID)))
+DEG_MF.table <- cbind(DEG_MF.table, ontology=rep("MF", length(DEG_MF.table$GO.ID)))
+DEG_CC.table <- cbind(DEG_CC.table, ontology=rep("CC", length(DEG_CC.table$GO.ID)))
+
+DEG_GOallontology <-rbind(DEG_BP.table, DEG_MF.table, DEG_CC.table)
+write.csv(DEG_GOallontology, "DEGs_GOallontology_oocyte_photoperiod.csv")
+```
+
+
+
+
+#OOCYTE
+## Oocyte: nutrition
+```{r LoadinGeneData.Oonut, echo=FALSE}
+DEGlist.Oonut <- read.csv2(file = "../DEGlist/DEGData/deg_oocyte_U14vU1.csv", header=TRUE, sep=",")
+rownames(DEGlist.Oonut) <- DEGlist.Oonut$X
+DEGlist.Oonut <- DEGlist.Oonut[,-1]
+
+```
+
+
+## GO Enrichment Analysis
+I'm using the following resource to work through the GO analysis.
+https://bioconductor.org/packages/release/bioc/vignettes/topGO/inst/doc/topGO.pdf
+
+### 'Universe' Gene List
+```{r allgeneslist.Oonut}
+#List of all genes
+geneUniverse.Oonut <- rownames(DEGlist.Oonut) #give list of all gene names
+#this is right
+```
+
+###'Gene' list for DEGs
+```{r deggeneslist.Oonut}
+#gene list for topgo input
+
+#should be an output of true=1 false=0 with names as the gene list
+DEG.genelist.Oonut <- as.numeric(DEGlist.Oonut$adj.P.Val)
+names(DEG.genelist.Oonut) <- geneUniverse.Oonut
+```
+
+
+#### Build GoData object
+Using the following resource as a guide: https://ucdavis-bioinformatics-training.github.io/2018-June-RNA-Seq-Workshop/friday/enrichment.html
+
+
+##### BP
+```{r BP_DEG.Oonut}
+DEgenes.GO.bp.Oonut <- new("topGOdata",
+                description = paste("DEG Go", "BP", sep = "_"), 
+                ontology = "BP",
+                allGenes = DEG.genelist.Oonut, # all genes in the "universe" aka our experiment
+                geneSel = topDiffGenes,
+                gene2GO = gene2mapping,
+                annot = annFUN.gene2GO)
+
+
+
+#Kolmogorov-Smirnov testing
+DEG.bp_resultKS.Oonut <- runTest(DEgenes.GO.bp.Oonut, statistic = "ks")
+DEG.bp_resultKS.Oonut 
+
+DEG_BP.table.Oonut <- GenTable(DEgenes.GO.bp.Oonut, raw.p.value = DEG.bp_resultKS.Oonut , topNodes = 
+                              length(DEG.bp_resultKS.Oonut@score), numChar = 120)
+
+write.csv(DEG_BP.table.Oonut, "Oocyte_Nutrition/OocyteDEGforNutrition_BPTerms.csv")
+```
+
+##### MF
+```{r mf_DEG.Oonut}
+DEgenes.GO.mf.Oonut <- new("topGOdata",
+                description = paste("DEG Go", "MF", sep = "_"), 
+                ontology = "MF",
+                allGenes = DEG.genelist.Oonut, # all genes in the "universe" aka our experiment
+                geneSel = topDiffGenes,
+                gene2GO = gene2mapping,
+                annot = annFUN.gene2GO)
+
+
+
+#Kolmogorov-Smirnov testing
+DEG.mf_resultKS.Oonut <- runTest(DEgenes.GO.mf.Oonut, statistic = "ks")
+DEG.mf_resultKS.Oonut 
+
+DEG_MF.table.Oonut <- GenTable(DEgenes.GO.mf.Oonut, raw.p.value = DEG.mf_resultKS.Oonut , topNodes = 
+                              length(DEG.mf_resultKS.Oonut@score), numChar = 120)
+
+write.csv(DEG_MF.table.Oonut, "Oocyte_Nutrition/OocyteDEGforNutrition_MFTerms.csv")
+```
+
+
+
+##### CC
+```{r cc_DEG.Oonut}
+DEgenes.GO.cc.Oonut <- new("topGOdata",
+                description = paste("DEG Go", "CC", sep = "_"), 
+                ontology = "CC",
+                allGenes = DEG.genelist.Oonut, # all genes in the "universe" aka our experiment
+                geneSel = topDiffGenes,
+                gene2GO = gene2mapping,
+                annot = annFUN.gene2GO)
+
+
+
+#Kolmogorov-Smirnov testing
+DEG.cc_resultKS.Oonut <- runTest(DEgenes.GO.cc.Oonut, statistic = "ks")
+DEG.cc_resultKS.Oonut 
+
+DEG_CC.table.Oonut <- GenTable(DEgenes.GO.cc.Oonut, raw.p.value = DEG.cc_resultKS.Oonut , topNodes = 
+                              length(DEG.cc_resultKS.Oonut@score), numChar = 120)
+
+write.csv(DEG_CC.table.Oonut, "Oocyte_Nutrition/OocyteDEGforNutrition_CCTerms.csv")
+```
+
+
+```{r largetable.DEG_Node=1}
+DEG_BP.table.Oonut <- cbind(DEG_BP.table.Oonut, ontology=rep("BP", length(DEG_BP.table.Oonut$GO.ID)))
+DEG_MF.table.Oonut <- cbind(DEG_MF.table.Oonut, ontology=rep("MF", length(DEG_MF.table.Oonut$GO.ID)))
+DEG_CC.table.Oonut <- cbind(DEG_CC.table.Oonut, ontology=rep("CC", length(DEG_CC.table.Oonut$GO.ID)))
+
+DEG_GOallontology <-rbind(DEG_BP.table.Oonut, DEG_MF.table.Oonut, DEG_CC.table.Oonut)
+write.csv(DEG_GOallontology, "DEGs_GOallontology_oocyte_nutrition.csv")
+```
+
+
+```{r show genes numbers}
+table(topDiffGenes(DEG.genelist))
+table(topDiffGenes(DEG.genelist.Oonut))
+```
+
+
+
+#microRNA enrichment: DEG for photoperiod
+## Load in Data
+```{r LoadinGeneData_mircoRNA, echo=FALSE}
+
+#DE mirs
+mirna_genelist <- read.csv2("DEGData/miRDEGlist_wave.csv", sep = ",", header = FALSE)
+
+
+#universal gene list
+mir_universegenes <- read.csv2("DEGData/universetargets.csv", sep = ",", header = FALSE)
+
+```
+
+
+## Annotation File Subset
+```{r readinannotation_mir}
+#read in the GO annotation file for mrot
+#updated on 8/10/2022 by MAH
+annotations <- read.delim("../../GOAnnotation/mrotundata_GOannotations_aug2022_pfamSFpant.txt", sep = " ", header=FALSE)
+colnames(annotations) <- c("genes", "GOs")
+
+#create a new annotation file that only contains genes that were found in the mir genelist
+annotations_mirsubset <- annotations[annotations$genes %in% mir_universegenes$V1,]
+length(annotations_mirsubset$genes)
+
+#write it out so you can import it as the read mapping format
+#couldn't all simply calling table above
+write.table(annotations_mirsubset, "../../GOEnrichmentAnalyses/DEGlist/mrotGO_mirsubset.txt", row.names = FALSE, col.names=FALSE, quote = FALSE)
+
+#read in annotation subset as a mapping file
+gene2mapping_mirs <- readMappings("../../GOEnrichmentAnalyses/DEGlist/mrotGO_mirsubset.txt", sep = " ", IDsep=",")
+```
+
+
+###'Gene' list for miRNA vs universe
+```{r modulesgeneslist}
+#gene list for topgo input
+
+mirDEGlist <- mirna_genelist$V1
+
+#universe in proper setup
+miruniverse <- mir_universegenes$V1
+
+#should be an output of true=1 false=0 with names as the gene list
+mirDEG.genelist.topgoinput <- factor(as.integer(miruniverse %in% mirDEGlist))
+names(mirDEG.genelist.topgoinput) <- miruniverse
+table(mirDEG.genelist.topgoinput)
+```
+
+
+##Enrichment Analyses
+### BP
+```{r bp_micro}
+
+MIRwave.GO.bp <- new("topGOdata",
+                description = paste("MiRNA DEGs for Wave Go", "BP", sep = "_"), 
+                ontology = "BP",
+                #should be factors 0 or 1
+                allGenes = mirDEG.genelist.topgoinput, #genes for the module of interest
+                gene2GO = gene2mapping_mirs, #this is the mir Subset
+                annot = annFUN.gene2GO)
+
+
+#FISHERS
+MIRwave.GO.bp_result_Fisher <- runTest(MIRwave.GO.bp, statistic = "fisher")
+#algorithm default = weight01
+
+MIRwave.GO.bp_result_Fisher
+
+MIRwave.GO.bp.table <- GenTable(MIRwave.GO.bp, raw.p.value = MIRwave.GO.bp_result_Fisher, topNodes = 
+                              length(MIRwave.GO.bp_result_Fisher@score), numChar = 120)
+
+write.csv(MIRwave.GO.bp.table, "microRNA/mircroRNA_BPTerms.csv")
+```
+
+
+### MF
+```{r mf_micro}
+
+MIRwave.GO.mf <- new("topGOdata",
+                description = paste("MiRNA DEGs for Wave Go", "MF", sep = "_"), 
+                ontology = "MF",
+                #should be factors 0 or 1
+                allGenes = mirDEG.genelist.topgoinput, #genes for the module of interest
+                gene2GO = gene2mapping_mirs, #this is the mir Subset
+                annot = annFUN.gene2GO)
+
+
+#FISHERS
+MIRwave.GO.mf_result_Fisher <- runTest(MIRwave.GO.mf, statistic = "fisher")
+#algorithm default = weight01
+
+MIRwave.GO.mf_result_Fisher
+
+MIRwave.GO.mf.table <- GenTable(MIRwave.GO.mf, raw.p.value = MIRwave.GO.mf_result_Fisher, topNodes = 
+                              length(MIRwave.GO.mf_result_Fisher@score), numChar = 120)
+
+write.csv(MIRwave.GO.mf.table, "microRNA/mircroRNA_MFTerms.csv")
+```
+
+### CC
+```{r cc_micro}
+
+MIRwave.GO.cc <- new("topGOdata",
+                description = paste("MiRNA DEGs for Wave Go", "CC", sep = "_"), 
+                ontology = "CC",
+                #should be factors 0 or 1
+                allGenes = mirDEG.genelist.topgoinput, #genes for the module of interest
+                gene2GO = gene2mapping_mirs, #this is the mir Subset
+                annot = annFUN.gene2GO)
+
+
+#FISHERS
+MIRwave.GO.cc_result_Fisher <- runTest(MIRwave.GO.cc, statistic = "fisher")
+#algorithm default = weight01
+
+MIRwave.GO.cc_result_Fisher
+
+MIRwave.GO.cc.table <- GenTable(MIRwave.GO.cc, raw.p.value = MIRwave.GO.cc_result_Fisher, topNodes = 
+                              length(MIRwave.GO.cc_result_Fisher@score), numChar = 120)
+
+write.csv(MIRwave.GO.cc.table, "microRNA/mircroRNA_CCTerms.csv")
+```
+
+
+```{r largetable.mir}
+MIRwave.GO.bp.table <- cbind(MIRwave.GO.bp.table, ontology=rep("BP", length(MIRwave.GO.bp.table$GO.ID)))
+MIRwave.GO.mf.table <- cbind(MIRwave.GO.mf.table, ontology=rep("MF", length(MIRwave.GO.mf.table$GO.ID)))
+MIRwave.GO.cc.table <- cbind(MIRwave.GO.cc.table, ontology=rep("CC", length(MIRwave.GO.cc.table$GO.ID)))
+
+MIRwave_GOallontology <-rbind(MIRwave.GO.bp.table, MIRwave.GO.mf.table, MIRwave.GO.cc.table)
+write.csv(MIRwave_GOallontology, "DEGs_GOallontology_MIRna_wave.csv")
+```

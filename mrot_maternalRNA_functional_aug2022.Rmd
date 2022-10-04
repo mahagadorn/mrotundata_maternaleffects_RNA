@@ -1,0 +1,546 @@
+---
+title: "MROT maternal RNA DEG GO analysis"
+author: "Karen M. Kapheim"
+date: "8/10/22"
+output:
+  word_document: default
+  pdf_document: default
+---
+
+This is downstream, functional analysis of the mRNA and microRNA DEG 
+analysis performed on _Megachile rotundata_ oocytes and eggs. 
+
+There were generally no differentially expressed genes or miRs in eggs, 
+so this functional analysis is limited to oocytes.  
+
+Using results from the main effects DEG analysis    
+`design.o2 <- model.matrix(~oW + oT)`    
+instead of the 2x2 interaction model that used a grouping factor. 
+The reason is because there were no interactions, so it is more 
+powerful to identify main effects. 
+
+Here I have taken the output from 
+`mrot_microRNA_DEG_Dec2021.Rmd` and `mrot_mRNA_DEG_Dec2021.Rmd`.
+
+The plan is to integrate them and do functional enrichment analysis.
+
+I did this earlier in a file dated Jan 2022, but here I am using a 
+different GO enrichment method, because I didn't fully understand what the 
+other method was doing. Here I am following code I previously used for the 
+pioneer project (`mrot_for60_ipr_23aug2013`.)
+
+Also, I am doing this on my laptop now, because I could not get the 
+necessary packages to load in R on the cluster.
+
+UPDATE 5/17/22: Tim DeLory sent new target predictions that are based on 
+a less stringent cutoff so that there are more of them to work with. This 
+cutoff matches what we did in Kapheim et al. 2020.
+
+UPDATE 8/10/22: 
+
+- Mal Hagadorn reannotated the mrot genes with InterProScan. So now 
+using the updated annotation for GO enrichment.
+
+- Want to test the hypothesis that egg miRs play a role in clearing 
+maternal mRNA. So looking for overlap between the genes expressed in 
+oocytes and predicted targets of egg miRs
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = TRUE,
+	warning = TRUE,
+background = "#F7F7F7",
+	highlight = TRUE)
+```
+
+# Setup
+
+## Load in Required Packages
+
+```{r loadpackages, echo=FALSE, warning=FALSE, message=FALSE}
+library("tidyverse")
+#
+options(stringsAsFactors = FALSE)
+```
+
+
+## Get data
+
+#### Differentially expressed mRNAs (oocytes)
+
+```{r data-1}
+# Wave results
+mRNAs_wave <- read.csv("../mrot_maternalRNA_mRNA/deg_oocyte_wave2v1.csv")[-1]
+mRNAs_wave <- mRNAs_wave %>% 
+  relocate(gene)
+mRNAs_wave <- mRNAs_wave %>% 
+  mutate(
+    deg_mRNA_wave = case_when(adj.P.Val < 0.05 ~ "yes",
+                              adj.P.Val >= 0.05 & adj.P.Val < 0.1 ~ "expanded",
+                              adj.P.Val>= 0.1 ~ "no"),
+    upW2_mRNA_wave = case_when(adj.P.Val < 0.1 & logFC > 0 ~ "yes"),
+    downW2_mRNA_wave = case_when(adj.P.Val < 0.1 & logFC < 0 ~ "yes")
+      )
+# Treatment results
+mRNAs_tx <- read.csv("../mrot_maternalRNA_mRNA/deg_oocyte_U14vU1.csv")[-1]
+mRNAs_tx <- mRNAs_tx %>% 
+  relocate(gene)
+mRNAs_tx <- mRNAs_tx %>% 
+  mutate(
+    deg_mRNA_tx = case_when(adj.P.Val < 0.05 ~ "yes",
+                              adj.P.Val >= 0.05 & adj.P.Val < 0.1 ~ "expanded",
+                              adj.P.Val >= 0.1 ~ "no"),
+    upU14_mRNA_tx = case_when(adj.P.Val < 0.1 & logFC > 0 ~ "yes"),
+    downU14_mRNA_tx = case_when(adj.P.Val < 0.1 & logFC < 0 ~ "yes")
+      )
+
+```
+
+#### Differentially expressed microRNAs (oocytes)
+
+There were only DEGs for wave - none for treatment
+
+```{r data-2}
+# Wave results
+miRs_wave <- read.csv("../mrot_maternalRNA_miRs/deg_oocyte_wave2v1.csv")[-1]
+miRs_wave <- miRs_wave %>% 
+  relocate(gene)
+miRs_wave <- miRs_wave %>% 
+  dplyr::rename(miR_ID = gene)
+miRs_wave <- miRs_wave %>% 
+  mutate(
+    deg_miR_wave = case_when(adj.P.Val < 0.05 ~ "yes",
+                              adj.P.Val >= 0.05 & adj.P.Val < 0.1 ~ "expanded",
+                              adj.P.Val>= 0.1 ~ "no"),
+    upW2_miR_wave = case_when(adj.P.Val < 0.1 & logFC > 0 ~ "yes"),
+    downW2_miR_wave = case_when(adj.P.Val < 0.1 & logFC < 0 ~ "yes")
+      )
+# Treatment results
+miRs_tx <- read.csv("../mrot_maternalRNA_miRs/deg_oocyte_U14vU1.csv")[-1]
+miRs_tx <- miRs_tx %>% 
+  relocate(gene)
+miRs_tx <- miRs_tx %>% 
+  mutate(
+    deg_miR_tx = case_when(adj.P.Val < 0.05 ~ "yes",
+                              adj.P.Val >= 0.05 & adj.P.Val < 0.1 ~ "expanded",
+                              adj.P.Val>= 0.1 ~ "no"),
+    upU14_miR_tx = case_when(adj.P.Val < 0.1 & logFC > 0 ~ "yes"),
+    downU14_miR_tx = case_when(adj.P.Val < 0.1 & logFC < 0 ~ "yes")
+      )
+```
+
+#### Egg mRNAs
+
+```{r data-2b}
+# wave
+egg_mRNAs_wave <- read.csv("../mrot_maternalRNA_mRNA/deg_egg_wave2v1.csv")[-1]
+mRNAs_wave <- mRNAs_wave %>% 
+  relocate(gene)
+# tx
+egg_mRNAs_tx <- read.csv("../mrot_maternalRNA_mRNA/deg_egg_U14vU1.csv")[-1]
+mRNAs_tx <- mRNAs_tx %>% 
+  relocate(gene)
+```
+
+#### Egg microRNAs
+
+```{r data-2c}
+# wave
+egg_miRs <- read.csv("../mrot_maternalRNA_miRs/deg_egg_wave2v1.csv")[-1]
+egg_miRs <- egg_miRs %>% 
+  relocate(gene) %>% 
+  dplyr::rename(miR_ID = gene)
+```
+
+
+#### microRNA annotations
+
+```{r data-3}
+miR_labels <- read.csv("../mrot_maternalRNA_miRs/merged_w_mirbase_TD_2021dec08.csv")[1:3]
+miR_labels <- miR_labels %>% 
+  dplyr::rename(miR_ID = X)
+miR_labels <- miR_labels %>% 
+  relocate(miR_ID)
+```
+
+#### microRNA predicted targets
+
+File from Tim DeLory 5/17/22:
+
+> Here is the layout of new miRNA gene target table. 
+Col 1: Pre-existing id
+Col 2: provisional id (or merged provisional ids for any overlapping 
+precursor sequences w/ identical mature sequence)
+Col 3: Mature mirna sequence
+Col 4: Gene id for Mrot
+If a gene was tied to a mature miRNA sequence that had two separate 
+provisional ids that didn't overlap, the gene is list twice in a row.
+
+
+```{r data-4}
+#miR_targets <- read.csv("sig01_provid_targets_miranda_rnahyrbid.csv", 
+#                        header = FALSE)[-1]
+#miR_targets <- miR_targets %>% 
+#  dplyr::rename(gene = V2,
+#         mature_ids = V3,
+#         miR_ID = V4,
+#         miRbaseID = V5)
+
+miR_targets <- read.csv("sig01_provid_targets_miranda_rnahyrbid.csv", 
+                        header = FALSE)
+miR_targets <- miR_targets %>% 
+  dplyr::rename(gene = V4,
+         mature_ids = V3,
+         miR_ID = V2,
+         miRbaseID = V1)
+length(miR_targets$gene)
+n_distinct(miR_targets$gene)
+```
+
+
+# Describe DEGs
+
+How many DEGs are there?
+
+## mRNAs
+
+
+#### Treatment effects
+
+```{r degs-1}
+table(mRNAs_tx$deg_mRNA_tx)
+table(mRNAs_tx$deg_mRNA_tx, mRNAs_tx$upU14_mRNA_tx)
+table(mRNAs_tx$deg_mRNA_tx, mRNAs_tx$downU14_mRNA_tx)
+```
+
+19 genes DEG p < 0.05: 8 upregulated in U14, 11 downregulated in U14
+35 genes DEG p < 0.1: 15 upregulated in U14, 20 downregulated in U14
+
+```{r degs-2}
+mRNAs_tx.deg <- mRNAs_tx %>% 
+  filter(deg_mRNA_tx == "yes")
+mRNAs_tx.deg.expanded <- mRNAs_tx %>% 
+  filter(deg_mRNA_tx == "yes" | deg_mRNA_tx == "expanded")
+```
+
+#### Seasonal effects
+
+```{r degs-3}
+table(mRNAs_wave$deg_mRNA_wave)
+table(mRNAs_wave$deg_mRNA_wave, mRNAs_wave$upW2_mRNA_wave)
+table(mRNAs_wave$deg_mRNA_wave, mRNAs_wave$downW2_mRNA_wave)
+```
+
+
+4 genes DEG p < 0.05: 4 upregulated in late season, 0 down in late season
+956 genes DEG p < 0.1: 413 up in late season, 543 down in late season
+
+```{r degs-4}
+mRNAs_wave.deg <- mRNAs_wave %>% 
+  filter(deg_mRNA_wave == "yes")
+mRNAs_wave.deg.expanded <- mRNAs_wave %>% 
+  filter(deg_mRNA_wave == "yes" | deg_mRNA_wave == "expanded")
+```
+
+## microRNAs
+
+#### Treatment effects
+
+```{r degs-5}
+table(miRs_tx$deg_miR_tx)
+table(miRs_tx$deg_miR_tx, miRs_tx$upU14_miR_tx)
+table(miRs_tx$deg_miR_tx, miRs_tx$downU14_miR_tx)
+```
+
+
+0 miRs DEG p < 0.05
+0 miRs DEG p < 0.1
+
+#### Seasonal effects
+
+```{r degs-6}
+table(miRs_wave$deg_miR_wave)
+table(miRs_wave$deg_miR_wave, miRs_wave$upW2_miR_wave)
+table(miRs_wave$deg_miR_wave, miRs_wave$downW2_miR_wave)
+```
+
+
+13 miRs DEG p < 0.05: 2 upregulated in late season, 11 down in late season
+19 miRs DEG p < 0.1: 2 up in late season, 17 down in late season
+
+```{r degs-7}
+miRs_wave.deg <- miRs_wave %>% 
+  filter(deg_miR_wave == "yes")
+miRs_wave.deg.expanded <- miRs_wave %>% 
+  filter(deg_miR_wave == "yes" | deg_miR_wave == "expanded")
+```
+
+List the miRbase IDs for differentially expressed miRs
+
+###### Strict list
+
+```{r degs-8}
+miRs_wave.deg.labels <- left_join(miRs_wave.deg, miR_labels, by = "miR_ID")
+miRs_wave.deg.labels %>% 
+  dplyr::select(merged_mirbase_ids, upW2_miR_wave, downW2_miR_wave)
+```
+
+###### Expanded list
+
+```{r degs-9}
+miRs_wave.deg.expanded.labels <- left_join(miRs_wave.deg.expanded, 
+                                           miR_labels, by = "miR_ID")
+miRs_wave.deg.expanded.labels %>% 
+  dplyr::select(merged_mirbase_ids, upW2_miR_wave, downW2_miR_wave)
+```
+
+# miR Targets
+
+## oocyte DEGs
+
+*Do any of the differentially expressed miRs target the differentially expressed mRNAs?*
+
+Can only do this for season (wave), since there were no differentially 
+expressed miRs for treatment.
+
+
+Add the predicted targets to the miR list
+
+```{r targets-1}
+miRs_wave.deg_targets <- left_join(miRs_wave.deg, miR_targets, by = "miR_ID")
+miRs_wave.deg.expanded_targets <- left_join(miRs_wave.deg.expanded, 
+                                            miR_targets, by = "miR_ID")
+```
+
+
+```{r targets-2}
+n_distinct(miRs_wave.deg.expanded_targets)
+intersect(mRNAs_tx.deg$gene, miRs_wave.deg_targets$gene)
+intersect(mRNAs_tx.deg.expanded$gene, miRs_wave.deg.expanded_targets$gene)
+```
+
+None of the differentially expressed genes are predicted to be targeted by 
+differentially expressed miRs.
+
+## Egg vs Oocyte
+
+*Do the egg miRs preferentially target the oocyte mRNAs?*
+
+How many oocyte genes are targeted by egg miRs?
+
+```{r targets-3}
+miRs_egg_targets <- left_join(egg_miRs, miR_targets, by = "miR_ID")
+length(intersect(miRs_egg_targets$gene, mRNAs_wave$gene))
+```
+Is this more than expected by chance?
+
+Using the hypergeometric test to check for significant overlap between two gene sets:
+phyper(x, n, N-n, D, lower.tail = F)
+x = overlap 
+n = # genes expressed in oocytes `length(mRNAs_wave$gene)`
+D = # all unique target genes of egg miRs `n_distinct(miRs_egg_targets$gene)`
+N = # genes in universe (genes in genome) (see above)*** 
+
+***Genes in universe is the set of genes that was detected in BOTH studies, so exclude any genes that were detected in one study but not the other (edited) 
+
+```{r targets-4}
+phyper(211, 8276, (12770-8276), 375, lower.tail = F)
+
+```
+
+How many egg genes are targeted by egg miRs?
+
+```{r targets-5}
+length(intersect(miRs_egg_targets$gene, mRNAs_wave$gene))
+# get universe
+length(intersect(miR_targets$gene, mRNAs_wave$gene))
+```
+
+# Classify the mRNAs
+
+Classify mRNAs detected in oocytes and eggs as Class I-III from 
+Pires et al. 2016. Downloaded Supplementary Table S5.
+
+## Get data
+
+```{r pires-1}
+pires_class <- read.csv("Pires_mRNA_class_S5.csv")
+# first make long
+pires_class.l <- pires_class %>% 
+  pivot_longer(1:6, names_to = "class", values_to = "gene") %>% 
+  # recode empty strings "" by NAs
+  na_if("") %>%
+  # remove NAs
+  na.omit %>% 
+  # collapse diploid and haploid
+  mutate(class = case_when(class == "class1_2n" | 
+                             class == "class1_1n" ~ "classI", 
+                           class == "class2_2n" | 
+                             class == "class2_1n" ~ "classII", 
+                           class == "class3_2n" | 
+                             class == "class3_1n" ~ "classIII")
+         ) %>% 
+  # remove duplicate rows
+  distinct() %>% 
+  # add a variable to confirm class 
+  mutate(observed = 1)
+# now make wide
+pires.class.w <- pires_class.l %>% 
+  pivot_wider(names_from = "class", values_from = "observed", values_fill = 0)
+```
+
+## Get orthologs
+
+#### honey bee
+
+From `/uufs/chpc.utah.edu/common/home/kapheim-group1/blastdbs/results/parsed`
+
+```{r pires-2}
+mrot.amel <- read_delim("mrot_amel.txt", col_names = F)
+amel.mrot <- read_delim("amel_mrot.txt", col_names = F)
+#
+mrot.amel <- mrot.amel %>% 
+  dplyr::rename(mrot_gene = "X1", 
+         amel_gene = "X2") 
+mrot.amel$amel_gene <- substr(mrot.amel$amel_gene,1,nchar(mrot.amel$amel_gene)-3)
+#
+amel.mrot <- amel.mrot %>% 
+  dplyr::rename(amel_gene = "X1", 
+         mrot_gene = "X2") 
+amel.mrot$amel_gene <- substr(amel.mrot$amel_gene,1,nchar(amel.mrot$amel_gene)-3)
+# get rbh
+rbh.amel.mrot <- mrot.amel %>% 
+  inner_join(amel.mrot, keep = F) %>% 
+  distinct()
+```
+
+#### fly
+
+From Pires et al. 2016 Supplementary table S3
+
+NOTE: Zelda is 	Mrot02678
+
+```{r pires-3}
+rbh.amel.dmel <- read_csv("Pires_mRNA_flyorthos_S3.csv")
+rbh.amel.dmel <- rbh.amel.dmel %>% 
+  dplyr::select(amel_gene, dmel_gene, gene_name)
+rbh.amel.mrot.fly <- rbh.amel.mrot %>% 
+  left_join(rbh.amel.dmel, by = "amel_gene")
+```
+
+## Merge with class
+
+```{r pires-4}
+mrot.amel.fly.class <- rbh.amel.mrot.fly %>% 
+  left_join(pires.class.w, by = c("amel_gene" =  "gene"))
+```
+
+## Now merge with oocyte and egg genes
+
+#### Oocyte
+
+```{r pires-5}
+# wave
+oocyte.mRNAs_wave.class <- mRNAs_wave %>% 
+  left_join(mrot.amel.fly.class, by = c("gene" =  "mrot_gene")) %>% 
+  mutate(total_pires = classI + classII + classIII, 
+         cI_III_pires = classI + classIII)
+# tx
+oocyte.mRNAs_tx.class <- mRNAs_tx %>% 
+  left_join(mrot.amel.fly.class, by = c("gene" =  "mrot_gene")) %>% 
+  mutate(total_pires = classI + classII + classIII, 
+         cI_III_pires = classI + classIII)
+```
+
+###### Percent oocyte genes per class
+
+```{r pires-6}
+table(oocyte.mRNAs_wave.class$total_pires, useNA = "always")
+table(oocyte.mRNAs_wave.class$cI_III_pires, useNA = "always")
+```
+
+5918/8276 do not have orthologs detected in Pires et al
+This means only 2358 (28.5%) of genes detected in our oocytes have orthologs 
+detected in Pires
+
+Of the 2358, only 558 (23.7%) are classified as class I or III in Pires et al.
+
+###### Zelda expression in oocytes
+
+```{r pires-7}
+oocyte.mRNAs_wave.class %>% filter(grepl("Mrot02678", gene))
+oocyte.mRNAs_tx.class %>% filter(grepl("Mrot02678", gene))
+```
+
+Zelda is detected in oocyte, but not deg for tx.     
+However, it is marginally significantly upregulated in oocytes in 
+late season compared to early season (logFC 0.32, adj p = 0.101).
+
+#### Egg
+
+```{r pires-8}
+# wave
+egg.mRNAs_wave.class <- egg_mRNAs_wave %>% 
+  left_join(mrot.amel.fly.class, by = c("gene" =  "mrot_gene")) %>% 
+  mutate(total_pires = classI + classII + classIII, 
+         cI_III_pires = classI + classIII)
+# tx
+egg.mRNAs_tx.class <- egg_mRNAs_tx %>% 
+  left_join(mrot.amel.fly.class, by = c("gene" =  "mrot_gene")) %>% 
+  mutate(total_pires = classI + classII + classIII, 
+         cI_III_pires = classI + classIII)
+```
+
+###### Percent oocyte genes per class
+
+```{r pires-9}
+table(egg.mRNAs_wave.class$total_pires, useNA = "always")
+table(egg.mRNAs_wave.class$classII, useNA = "always")
+```
+
+6758/9200 do not have orthologs detected in Pires et al
+This means only 2442 (26.5%) of genes detected in our eggs have orthologs 
+detected in Pires
+
+Of those 2442, 1860 (76.2%) are classified as class II (zygotic) in Pires et al.
+
+###### Zelda expression in oocytes
+
+```{r pires-10}
+egg.mRNAs_wave.class %>% filter(grepl("Mrot02678", gene))
+egg.mRNAs_tx.class %>% filter(grepl("Mrot02678", gene))
+```
+
+Zelda is detected in egg, but not deg for either tx or wave
+
+# Write annotated gene files
+
+## mRNA
+
+```{r write-1}
+write.csv(egg.mRNAs_wave.class, file = "egg_mRNADEG_wave_annotated.csv", 
+          row.names = F)
+write.csv(egg.mRNAs_tx.class, file = "egg_mRNADEG_tx_annotated.csv", 
+          row.names = F)
+write.csv(oocyte.mRNAs_wave.class, file = "oocyte_mRNADEG_wave_annotated.csv", 
+          row.names = F)
+write.csv(oocyte.mRNAs_tx.class, file = "oocyte_mRNADEG_tx_annotated.csv", 
+          row.names = F)
+```
+
+
+# Bookkeeping
+
+```{r citations-1}
+print(sessionInfo())
+```
+
+```{r sessioninfo, echo=FALSE, warning=FALSE, message=FALSE}
+installed.packages()[names(sessionInfo()$otherPkgs), "Version"] 
+#gives output of versions being used; easy MS reporting
+```
+
+```{r citations-2}
+citation("tidyverse")
+```

@@ -1,0 +1,491 @@
+---
+title: 'Megachile rotundata: gene ontology enrichment analyses (maternal RNA project)'
+author: "M.A. Hagadorn"
+date: "`r format(Sys.time(), '%B %d, %Y')`"
+output:
+  pdf_document:
+    toc: true
+    toc_depth: 2
+editor_options: 
+  chunk_output_type: console
+---
+
+
+# Load in Gene Data
+```{r loadpackages, warning=FALSE, echo=FALSE, message=FALSE, include=FALSE}
+#Library Necessary Packages
+library(tidyverse)
+library(lattice)
+library(lintr)
+library(AnnotationDbi)
+library(topGO)
+library(rrvgo)
+library(org.Dm.eg.db)
+options(stringsAsFactors = FALSE)
+
+```
+
+```{r sessioninformation, echo=FALSE}
+installed.packages()[names(sessionInfo()$otherPkgs), "Version"]
+
+```
+
+
+# Load in Data
+```{r LoadinGeneData, echo=FALSE}
+#output from WGCNA analysis
+#contains list of all the genes and what module they were in
+Oocyte_genedata <- read.csv2("geneInfo_OOCYTE.csv", sep = ",", header = TRUE)
+rownames(Oocyte_genedata) <- Oocyte_genedata$geneid
+
+Oocyte_genedata <- Oocyte_genedata[,-c(1:2)]
+
+```
+
+
+# Subset data by important modules
+```{r modules}
+#subsetting data frame by modules significant for wave (the only factor with significant modules)
+
+#MEviolet
+oocytegenes_MEviolet <- Oocyte_genedata[Oocyte_genedata$moduleColor=="violet",]
+
+#MEmidnightblue
+oocytegenes_MEmidnightblue <- Oocyte_genedata[Oocyte_genedata$moduleColor=="midnightblue",]
+
+#darkturquoise
+oocytegenes_MEdarkturquoise <- Oocyte_genedata[Oocyte_genedata$moduleColor=="darkturquoise",]
+
+#grey60
+oocytegenes_MEgrey60 <- Oocyte_genedata[Oocyte_genedata$moduleColor=="grey60",]
+
+```
+
+
+
+
+# GO Enrichment Analysis
+I'm using the following resource to work through the GO analysis.
+https://bioconductor.org/packages/release/bioc/vignettes/topGO/inst/doc/topGO.pdf
+
+## Data preparation
+
+### Read in GO annotations
+```{r readinannotation}
+#read in the GO annotation file for mrot
+#updated on 8/10/2022 by MAH
+annotations <- read.delim("../../GOAnnotation/mrotundata_GOannotations_aug2022_pfamSFpant.txt", sep = " ", header=FALSE)
+colnames(annotations) <- c("genes", "GOs")
+
+#get list of genes from wgcna
+WGCNAinputgenes <- rownames(Oocyte_genedata)
+
+#create a new annotation file that only contains genes that were found in the WGCNA genelist
+annotations_WGCNA <- annotations[annotations$genes %in% WGCNAinputgenes,]
+length(annotations_WGCNA$genes)
+
+#write it out so you can import it as the read mapping format
+#couldn't all simply calling table above
+write.table(annotations_WGCNA, "../../GOEnrichmentAnalyses/WGCNA/mrotGO_WGCNAsubset.txt", row.names = FALSE, col.names=FALSE, quote = FALSE)
+
+#read in annotation subset as a mapping file
+gene2mapping <- readMappings("../../GOEnrichmentAnalyses/WGCNA/mrotGO_WGCNAsubset.txt", sep = " ", IDsep=",")
+```
+
+
+
+### 'Universe' Gene List
+```{r allgeneslist}
+#List of all genes from the WGCNA--same as above just rechecking
+geneUniverse <- rownames(Oocyte_genedata)
+length(geneUniverse)
+
+#make gene list for specific modules
+violet.genes <- rownames(oocytegenes_MEviolet)
+darkturquoise.genes <- rownames(oocytegenes_MEdarkturquoise)
+grey60.genes <- rownames(oocytegenes_MEgrey60)
+midnightblue.genes <- rownames(oocytegenes_MEmidnightblue)
+```
+
+
+###'Gene' list for modules
+```{r modulesgeneslist}
+#gene list for topgo input
+
+#should be an output of true=1 false=0 with names as the gene list
+violet.genelist <- factor(as.integer(geneUniverse %in% violet.genes))
+names(violet.genelist) <- geneUniverse
+table(violet.genelist)
+  
+darkturquoise.genelist <- factor(as.integer(geneUniverse %in% darkturquoise.genes))
+names(darkturquoise.genelist) <- geneUniverse
+table(darkturquoise.genelist)
+  
+grey60.genelist <- factor(as.integer(geneUniverse %in% grey60.genes))
+names(grey60.genelist) <- geneUniverse
+table(grey60.genelist)
+
+midnightblue.genelist <- factor(as.integer(geneUniverse %in% midnightblue.genes))
+names(midnightblue.genelist) <- geneUniverse
+table(midnightblue.genelist)
+```
+
+
+
+
+### Build GoData object
+Using the following resources as guides: https://ucdavis-bioinformatics-training.github.io/2018-June-RNA-Seq-Workshop/friday/enrichment.html
+http://compdiag.molgen.mpg.de/ngfn/docs/2007/sep/topGO_Exercises.pdf
+
+#### violet
+##### BP
+```{r bp_violet}
+
+VioletModule.GO.bp <- new("topGOdata",
+                description = paste("Violet Module Go", "BP", sep = "_"), 
+                ontology = "BP",
+                #should be factors 0 or 1
+                allGenes = violet.genelist, #genes for the module of interest
+                gene2GO = gene2mapping, #this is the WGCNA subsetted annotation file
+                annot = annFUN.gene2GO)
+
+
+#FISHERS
+Violet.bp_result_Fisher <- runTest(VioletModule.GO.bp, statistic = "fisher")
+#algorithm default = weight01
+
+Violet.bp_result_Fisher
+
+Violet_BP.table <- GenTable(VioletModule.GO.bp, raw.p.value = Violet.bp_result_Fisher, topNodes = 
+                              length(Violet.bp_result_Fisher@score), numChar = 120)
+
+write.csv(Violet_BP.table, "oocyteMod29/oocyteMod29_BPTerms.csv")
+```
+
+
+##### MF
+```{r mf_violet}
+
+VioletModule.GO.mf <- new("topGOdata",
+                description = paste("Violet Module Go", "MF", sep = "_"), 
+                ontology = "MF",
+                #should be factors 0 or 1
+                allGenes = violet.genelist, # all genes in the "universe" aka our experiment; 
+                gene2GO = gene2mapping,
+                annot = annFUN.gene2GO)
+
+
+#FISHERS
+Violet.mf_result_Fisher <- runTest(VioletModule.GO.mf, statistic = "fisher")
+#algorithm default = weight01
+
+Violet.mf_result_Fisher
+
+Violet_MF.table <- GenTable(VioletModule.GO.mf, raw.p.value = Violet.mf_result_Fisher, topNodes = 
+                              length(Violet.mf_result_Fisher@score), numChar = 120)
+
+write.csv(Violet_MF.table, "oocyteMod29/oocyteMod29_MFTerms.csv")
+```
+
+
+##### CC
+```{r cc_violet}
+
+VioletModule.GO.cc <- new("topGOdata",
+                description = paste("Violet Module Go", "CC", sep = "_"), 
+                ontology = "CC",
+                #should be factors 0 or 1
+                allGenes = violet.genelist, # all genes in the "universe" aka our experiment; 
+                gene2GO = gene2mapping,
+                annot = annFUN.gene2GO)
+
+
+#FISHERS
+Violet.cc_result_Fisher <- runTest(VioletModule.GO.cc, statistic = "fisher")
+#algorithm default = weight01
+
+Violet.cc_result_Fisher
+
+Violet_CC.table <- GenTable(VioletModule.GO.cc, raw.p.value = Violet.cc_result_Fisher, topNodes = 
+                              length(Violet.cc_result_Fisher@score), numChar = 120)
+
+write.csv(Violet_CC.table, "oocyteMod29/oocyteMod29_CCTerms.csv")
+```
+
+
+```{r largetable.violet_Node=1}
+Violet_BP.table <- cbind(Violet_BP.table, ontology=rep("BP", length(Violet_BP.table$GO.ID)))
+Violet_MF.table <- cbind(Violet_MF.table, ontology=rep("MF", length(Violet_MF.table$GO.ID)))
+Violet_CC.table <- cbind(Violet_CC.table, ontology=rep("CC", length(Violet_CC.table$GO.ID)))
+
+Violet_GOallontology <-rbind(Violet_BP.table, Violet_MF.table, Violet_CC.table)
+
+
+write.csv(Violet_GOallontology, "oocyteMod29_GOallontology.csv")
+```
+
+
+
+#### DarkTurquoise
+##### BP
+```{r bp_darkturquoise}
+
+DarkTurquoiseModule.GO.bp <- new("topGOdata",
+                description = paste("DarkTurquoise Module Go", "BP", sep = "_"), 
+                ontology = "BP",
+                #should be factors 0 or 1
+                allGenes = darkturquoise.genelist, # all genes in the "universe" aka our experiment; 
+                gene2GO = gene2mapping,
+                annot = annFUN.gene2GO)
+
+
+#FISHERS
+DarkTurquoise.bp_result_Fisher <- runTest(DarkTurquoiseModule.GO.bp, statistic = "fisher")
+#algorithm default = weight01
+
+DarkTurquoise.bp_result_Fisher
+
+DarkTurquoise_BP.table <- GenTable(DarkTurquoiseModule.GO.bp, raw.p.value = DarkTurquoise.bp_result_Fisher, topNodes = 
+                              length(DarkTurquoise.bp_result_Fisher@score), numChar = 120)
+
+write.csv(DarkTurquoise_BP.table, "oocyteMod20/oocyteMod20_BPTerms.csv")
+```
+
+
+##### MF
+```{r mf_darkturquoise}
+
+DarkTurquoiseModule.GO.mf <- new("topGOdata",
+                description = paste("DarkTurquoise Module Go", "MF", sep = "_"), 
+                ontology = "MF",
+                #should be factors 0 or 1
+                allGenes = darkturquoise.genelist, # all genes in the "universe" aka our experiment; 
+                gene2GO = gene2mapping,
+                annot = annFUN.gene2GO)
+
+
+#FISHERS
+DarkTurquoise.mf_result_Fisher <- runTest(DarkTurquoiseModule.GO.mf, statistic = "fisher")
+#algorithm default = weight01
+
+DarkTurquoise.mf_result_Fisher
+
+DarkTurquoise_MF.table <- GenTable(DarkTurquoiseModule.GO.mf, raw.p.value = DarkTurquoise.mf_result_Fisher, topNodes = 
+                              length(DarkTurquoise.mf_result_Fisher@score), numChar = 120)
+
+write.csv(DarkTurquoise_MF.table, "oocyteMod20/oocyteMod20_MFTerms.csv")
+```
+
+
+##### CC
+```{r cc_darkturquoise}
+
+DarkTurquoiseModule.GO.cc <- new("topGOdata",
+                description = paste("DarkTurquoise Module Go", "CC", sep = "_"), 
+                ontology = "CC",
+                #should be factors 0 or 1
+                allGenes = darkturquoise.genelist, # all genes in the "universe" aka our experiment; 
+                gene2GO = gene2mapping,
+                annot = annFUN.gene2GO)
+
+
+#FISHERS
+DarkTurquoise.cc_result_Fisher <- runTest(DarkTurquoiseModule.GO.cc, statistic = "fisher")
+#algorithm default = weight01
+
+DarkTurquoise.cc_result_Fisher
+
+DarkTurquoise_CC.table <- GenTable(DarkTurquoiseModule.GO.cc, raw.p.value = DarkTurquoise.cc_result_Fisher, topNodes = 
+                              length(DarkTurquoise.cc_result_Fisher@score), numChar = 120)
+
+write.csv(DarkTurquoise_CC.table, "oocyteMod20/oocyteMod20_CCTerms.csv")
+```
+
+
+```{r largetable.darkturquoise_Node=1}
+DarkTurquoise_BP.table <- cbind(DarkTurquoise_BP.table, ontology=rep("BP", length(DarkTurquoise_BP.table$GO.ID)))
+DarkTurquoise_MF.table <- cbind(DarkTurquoise_MF.table, ontology=rep("MF", length(DarkTurquoise_MF.table$GO.ID)))
+DarkTurquoise_CC.table <- cbind(DarkTurquoise_CC.table, ontology=rep("CC", length(DarkTurquoise_CC.table$GO.ID)))
+
+DarkTurquoise_GOallontology <-rbind(DarkTurquoise_BP.table, DarkTurquoise_MF.table, DarkTurquoise_CC.table)
+
+
+write.csv(DarkTurquoise_GOallontology, "oocyteMod20_GOallontology.csv")
+```
+
+
+
+#### Grey60
+##### BP
+```{r bp_grey60}
+
+Grey60Module.GO.bp <- new("topGOdata",
+                description = paste("Grey60 Module Go", "BP", sep = "_"), 
+                ontology = "BP",
+                #should be factors 0 or 1
+                allGenes = grey60.genelist, # all genes in the "universe" aka our experiment; 
+                gene2GO = gene2mapping,
+                annot = annFUN.gene2GO)
+
+
+#FISHERS
+Grey60.bp_result_Fisher <- runTest(Grey60Module.GO.bp, statistic = "fisher")
+#algorithm default = weight01
+
+Grey60.bp_result_Fisher
+
+Grey60_BP.table <- GenTable(Grey60Module.GO.bp, raw.p.value = Grey60.bp_result_Fisher, topNodes = 
+                              length(Grey60.bp_result_Fisher@score), numChar = 120)
+
+write.csv(Grey60_BP.table, "oocyteMod16/oocyteMod16_BPTerms.csv")
+```
+
+
+##### MF
+```{r mf_grey60}
+
+Grey60Module.GO.mf <- new("topGOdata",
+                description = paste("Grey60 Module Go", "MF", sep = "_"), 
+                ontology = "MF",
+                #should be factors 0 or 1
+                allGenes = grey60.genelist, # all genes in the "universe" aka our experiment; 
+                gene2GO = gene2mapping,
+                annot = annFUN.gene2GO)
+
+
+#FISHERS
+Grey60.mf_result_Fisher <- runTest(Grey60Module.GO.mf, statistic = "fisher")
+#algorithm default = weight01
+
+Grey60.mf_result_Fisher
+
+Grey60_MF.table <- GenTable(Grey60Module.GO.mf, raw.p.value = Grey60.mf_result_Fisher, topNodes = 
+                              length(Grey60.mf_result_Fisher@score), numChar = 120)
+
+write.csv(Grey60_MF.table, "oocyteMod16/oocyteMod16_MFTerms.csv")
+```
+
+
+##### CC
+```{r cc_grey60}
+
+Grey60Module.GO.cc <- new("topGOdata",
+                description = paste("Grey60 Module Go", "CC", sep = "_"), 
+                ontology = "CC",
+                #should be factors 0 or 1
+                allGenes = grey60.genelist, # all genes in the "universe" aka our experiment; 
+                gene2GO = gene2mapping,
+                annot = annFUN.gene2GO)
+
+
+#FISHERS
+Grey60.cc_result_Fisher <- runTest(Grey60Module.GO.cc, statistic = "fisher")
+#algorithm default = weight01
+
+Grey60.cc_result_Fisher
+
+Grey60_CC.table <- GenTable(Grey60Module.GO.cc, raw.p.value = Grey60.cc_result_Fisher, topNodes = 
+                              length(Grey60.cc_result_Fisher@score), numChar = 120)
+
+write.csv(Grey60_CC.table, "oocyteMod16/oocyteMod16_CCTerms.csv")
+```
+
+
+```{r largetable.grey60_Node=1}
+Grey60_BP.table <- cbind(Grey60_BP.table, ontology=rep("BP", length(Grey60_BP.table$GO.ID)))
+Grey60_MF.table <- cbind(Grey60_MF.table, ontology=rep("MF", length(Grey60_MF.table$GO.ID)))
+Grey60_CC.table <- cbind(Grey60_CC.table, ontology=rep("CC", length(Grey60_CC.table$GO.ID)))
+
+Grey60_GOallontology <-rbind(Grey60_BP.table, Grey60_MF.table, Grey60_CC.table)
+
+
+write.csv(Grey60_GOallontology, "oocyteMod16_GOallontology.csv")
+```
+
+
+#### MidnightBlue
+##### BP
+```{r bp_midnightblue}
+
+MidnightBlueModule.GO.bp <- new("topGOdata",
+                description = paste("MidnightBlue Module Go", "BP", sep = "_"), 
+                ontology = "BP",
+                #should be factors 0 or 1
+                allGenes = midnightblue.genelist, # all genes in the "universe" aka our experiment; 
+                gene2GO = gene2mapping,
+                annot = annFUN.gene2GO)
+
+
+#FISHERS
+MidnightBlue.bp_result_Fisher <- runTest(MidnightBlueModule.GO.bp, statistic = "fisher")
+#algorithm default = weight01
+
+MidnightBlue.bp_result_Fisher
+
+MidnightBlue_BP.table <- GenTable(MidnightBlueModule.GO.bp, raw.p.value = MidnightBlue.bp_result_Fisher, topNodes = 
+                              length(MidnightBlue.bp_result_Fisher@score), numChar = 120)
+
+write.csv(MidnightBlue_BP.table, "oocyteMod4/oocyteMod4_BPTerms.csv")
+```
+
+
+##### MF
+```{r mf_midnightblue}
+
+MidnightBlueModule.GO.mf <- new("topGOdata",
+                description = paste("MidnightBlue Module Go", "MF", sep = "_"), 
+                ontology = "MF",
+                #should be factors 0 or 1
+                allGenes = midnightblue.genelist, # all genes in the "universe" aka our experiment; 
+                gene2GO = gene2mapping,
+                annot = annFUN.gene2GO)
+
+
+#FISHERS
+MidnightBlue.mf_result_Fisher <- runTest(MidnightBlueModule.GO.mf, statistic = "fisher")
+#algorithm default = weight01
+
+MidnightBlue.mf_result_Fisher
+
+MidnightBlue_MF.table <- GenTable(MidnightBlueModule.GO.mf, raw.p.value = MidnightBlue.mf_result_Fisher, topNodes = 
+                              length(MidnightBlue.mf_result_Fisher@score), numChar = 120)
+
+write.csv(MidnightBlue_MF.table, "oocyteMod4/oocyteMod4_MFTerms.csv")
+```
+
+
+##### CC
+```{r cc_midnightblue}
+
+MidnightBlueModule.GO.cc <- new("topGOdata",
+                description = paste("MidnightBlue Module Go", "CC", sep = "_"), 
+                ontology = "CC",
+                #should be factors 0 or 1
+                allGenes = midnightblue.genelist, # all genes in the "universe" aka our experiment; 
+                gene2GO = gene2mapping,
+                annot = annFUN.gene2GO)
+
+
+#FISHERS
+MidnightBlue.cc_result_Fisher <- runTest(MidnightBlueModule.GO.cc, statistic = "fisher")
+#algorithm default = weight01
+
+MidnightBlue.cc_result_Fisher
+
+MidnightBlue_CC.table <- GenTable(MidnightBlueModule.GO.cc, raw.p.value = MidnightBlue.cc_result_Fisher, topNodes = 
+                              length(MidnightBlue.cc_result_Fisher@score), numChar = 120)
+
+write.csv(MidnightBlue_CC.table, "oocyteMod4/oocyteMod4_CCTerms.csv")
+```
+
+
+```{r largetable.midnightblue_Node=1}
+MidnightBlue_BP.table <- cbind(MidnightBlue_BP.table, ontology=rep("BP", length(MidnightBlue_BP.table$GO.ID)))
+MidnightBlue_MF.table <- cbind(MidnightBlue_MF.table, ontology=rep("MF", length(MidnightBlue_MF.table$GO.ID)))
+MidnightBlue_CC.table <- cbind(MidnightBlue_CC.table, ontology=rep("CC", length(MidnightBlue_CC.table$GO.ID)))
+
+MidnightBlue_GOallontology <-rbind(MidnightBlue_BP.table, MidnightBlue_MF.table, MidnightBlue_CC.table)
+
+
+write.csv(MidnightBlue_GOallontology, "oocyteMod4_GOallontology.csv")
+```

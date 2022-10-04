@@ -1,0 +1,128 @@
+---
+title: "Mrotundata_Gene-Sample_Removal"
+author: "M.A. Hagadorn"
+date: "`r format(Sys.time(), '%B %d, %Y')`"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = TRUE,
+	warning = TRUE,
+	background = "#F7F7F7",
+	highlight = TRUE,
+	tidy.opts = list(width.cutoff = 60), tidy = TRUE)
+```
+
+# Step One: Preparing for Analysis
+```{r loadpackages, warning=FALSE, echo=FALSE, message=FALSE, include=FALSE}
+#Library Necessary Packages
+library(formatR)
+library(flashClust)
+library(DESeq2) 
+library(gplots) 
+library(ggplot2)
+library(RColorBrewer)
+library(affycoretools)
+library(genefilter)
+library(plotrix)
+library(reshape2)
+library(vegan)
+library(adegenet)
+library(stringr)
+
+
+library(WGCNA)
+library(plyr)
+options(stringsAsFactors = FALSE)
+
+```
+
+```{r sessioninformation, echo=FALSE}
+installed.packages()[names(sessionInfo()$otherPkgs), "Version"]
+
+```
+
+## Load in expression data
+```{r loaddata, include=TRUE}
+expdata_readin <- read.csv2("data/mrot_mRNA_htseq_counts_all.csv", header = TRUE, sep= ",", as.is = TRUE) #reads in the expression data
+#samples have X in front of because all numeric
+
+#remove extra data from the table
+#transpose table--females rows and genes are columns
+expdata_t <- as.data.frame(t(expdata_readin[,-c(1)])) #transpose df and remove column 1 == gene ids
+names(expdata_t) <- expdata_readin$X  #gene names as column names
+rownames(expdata_t) <- names(expdata_readin[,-c(1)]) #samples as rows (Still has X)
+rownames(expdata_t) <- gsub("X","", rownames(expdata_t)) #remove X
+```
+
+
+## Identify samples and genes with too many missing entries or zero variance
+```{r missingvalues}
+#check for samples to too many missing values
+gsg_expD <- goodSamplesGenes(expdata_t, verbose = 3)
+#Checking gsg
+gsg_expD$allOK
+#Return=false
+
+
+
+#write a loop to check for genes not passing the parameters and remove genes/samples
+if(!gsg_expD$allOK){
+  #if the number of genes is greater than 0; print genes for removal
+  if(sum(!gsg_expD$goodGenes) > 0) 
+    removedgenes <- names(expdata_t)[!gsg_expD$goodGenes]
+  
+  #if the number of samples is greater than 0; print the samples that need to be removed
+  if(sum(!gsg_expD$goodSamples) > 0)
+    removedsamples <- rownames(expdata_t)[!gsg_expD$goodSamples]
+  
+  #create new file containing that only contains "TRUE" genes/samples
+  expdat_cleaned <- expdata_t[gsg_expD$goodSamples, gsg_expD$goodGenes]
+  
+  #Dimensions of new data frame
+  dim(expdat_cleaned)
+}
+
+
+```
+
+We removed `r length(removedgenes)` genes and 0 samples. The following genes were removed:
+```{r list removed, echo=FALSE}
+print(noquote(removedgenes))
+```
+
+
+## Seperate Out Egg and Oocyte Samples
+```{r seperatebytissue}
+#Read in sample data
+sampledata <- read.csv2("data/sample_data.csv", 
+                     header = TRUE, sep= ",", as.is = TRUE)
+
+
+#create list of egg samples
+eggsamples <- subset(sampledata$id, sampledata$oocyte_egg=="egg")
+#create just EGG 
+expd_EGG <- subset(expdat_cleaned, rownames(expdat_cleaned) %in% eggsamples)
+
+#creat list of oocyte samples
+oocytesamples <- subset(sampledata$id, sampledata$oocyte_egg=="oocyte")
+#create just OOCYTE
+expd_OOCYTE <- subset(expdat_cleaned, rownames(expdat_cleaned) %in% oocytesamples)
+```
+
+## Save Data for use in seperate tissue anaylsis
+```{r save_data}
+save(expd_EGG, file="data/Mrotundata_expdataClean_EGG.RData")
+write.csv2(expd_EGG, file = "data/Mrotundata_expdataClean_EGG.csv")
+
+save(expd_OOCYTE, file="data/Mrotundata_expdataClean_OOCYTE.RData")
+write.csv2(expd_OOCYTE, file = "data/Mrotundata_expdataClean_OOCYTE.csv")
+```
+
+
+
+
+
+
+

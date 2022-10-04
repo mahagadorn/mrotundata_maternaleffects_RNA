@@ -1,0 +1,1458 @@
+---
+title: "Mrot Maternal RNA Analysis - mRNA"
+author: "Karen M. Kapheim"
+date: "May 1, 2022"
+output: pdf_document
+---
+
+
+**This is a redo of the Jan (`mrot_mRNA_DEG_Jan2022.Rmd`) pipeline to 
+make publication-ready figures. 
+
+Having trouble loading certain packages on the cluster, so bringing it onto 
+the laptop.
+
+A big difference is that I just used the compiled htseq counts, rather than 
+recompiling them from scratch, as I had on the cluster. So here, I am 
+pulling in `mrot_mRNA_htseq_counts_all.csv`, and I removed the code chunks 
+where I compiled and exported this.
+
+Information about the selection of pipeline tools and parameter choices 
+can be found in the Dec 2021 and Jan 2022 versions of this Rmd.
+
+Selection of pipeline tools was made based on comparative 
+analysis of performance (Corchete et al. 2020).
+
+https://doi.org/10.1038/s41598-020-76881-x
+
+The gold standard for analysis pipeline:   
+
+https://f1000research.com/articles/5-1408
+
+
+Guide to creating design matrices:   
+
+https://f1000research.com/articles/9-1444/v1
+
+Additional help from:
+
+https://wiki.bits.vib.be/index.php/NGS_RNASeq_DE_Exercise.4
+https://www.youtube.com/watch?v=Hg1abiNlPE4
+https://www.bioconductor.org/packages/devel/workflows/vignettes/RNAseq123/inst/doc/limmaWorkflow.html#reading-in-count-data
+https://ucdavis-bioinformatics-training.github.io/2018-June-RNA-Seq-Workshop/thursday/DE.html
+https://medium.com/biosyntax/using-limma-to-find-differentially-expressed-genes-1c12c905e3b1
+
+## Set-up
+
+#### Kniting
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#### Libraries
+
+```{r library}
+library(tidyverse)
+library(edgeR)
+library(limma)
+#library(Glimma)
+library(RColorBrewer)
+library(gplots)
+library(ggfortify)
+```
+
+
+#### directory
+
+```{r wkdir}
+setwd("C:/Users/Karen/Documents/research/wkdir/mrot_maternal_effects/mrot_maternalRNA_mRNA")
+```
+
+# All data
+
+## Data prep
+
+###### Sample data
+
+```{r data-1}
+sample_data <- read.csv("sample_data.csv")
+sample_data <- sample_data %>% 
+  arrange(id)
+sample_data <- sample_data %>% 
+  mutate_at(vars(id, oocyte_egg, cage, wave, tx, pair), factor)
+sample_data <- sample_data %>% 
+  mutate(
+    group0 = fct_cross(wave, tx, sep = "_"),
+    wave0 = wave,
+    wave = factor(paste("w", wave0, sep = "")))
+sample_data$group <- interaction("w", sample_data$group0, sep = "")
+```
+
+###### Read counts
+
+Following script `htseq-combine_all.R script` from 
+
+https://wiki.bits.vib.be/index.php/NGS_RNASeq_DE_Exercise.4
+
+
+```{r data-2}
+#basedir <- "/uufs/chpc.utah.edu/common/home/kapheim-group1/mrot_maternalRNA/alignment_quantification_mRNAs/"
+#setwd(basedir)
+
+#cntdir <- paste(basedir, "htseq", sep="/")
+#pat <- "\\.txt$"
+#tophat.all <- list.files(path = cntdir,
+#	pattern = pat,
+#	all.files = TRUE,
+#	recursive = FALSE,
+#	ignore.case = FALSE,
+#	include.dirs = FALSE)
+
+# we choose the 'all' series
+#myfiles <- tophat.all
+#DT <- list()
+ 
+# read each file as array element of DT and rename the last 2 cols
+# we created a list of single sample tables
+#for (i in 1:length(myfiles) ) {
+#	infile = paste(cntdir, myfiles[i], sep = "/")
+#	DT[[myfiles[i]]] <- read.table(infile, header = F, stringsAsFactors = FALSE)
+#	cnts <- gsub("counts_([0-9]+)_(.*).txt", "\\1", myfiles[i])
+#	colnames(DT[[myfiles[i]]]) <- c("ID", cnts)
+#}
+
+# merge all elements based on first ID columns
+#data <- DT[[myfiles[1]]]
+ 
+# inspect
+#head(data)   
+
+# we now add each other table with the ID column as key
+#for (i in 2:length(myfiles)) {
+#	y <- DT[[myfiles[i]]]
+#	z <- merge(data, y, by = c("ID"))
+#	data <- z
+#}
+ 
+# ID column becomes rownames
+#rownames(data) <- data$ID
+#data <- data[,-1]
+ 
+## add total counts per sample
+#data <- rbind(data, tot.counts=colSums(data))
+ 
+# inspect and look at the top row names!
+#head(data)
+#tail(data)
+
+# take summary rows to a new table
+# ( not starting with ENS with invert=TRUE )
+ 
+# transpose table for readability
+#data.all.summary <- data[grep("^Mrot", rownames(data), perl=TRUE, invert=TRUE), ]
+ 
+# review
+#data.all.summary
+ 
+# transpose table
+#t(data.all.summary)
+ 
+# write summary to file
+#write.csv(data.all.summary, file = "mrot_mRNA_htseq_counts_summary.csv")
+
+# take all data rows to a new table
+ 
+#data.all <- data[grep("^Mrot", rownames(data), perl=TRUE, invert=FALSE), ]
+ 
+# final merged table
+#head(data.all)
+#tail(data.all)
+ 
+# write data to file
+#write.csv(data.all, file = "mrot_mRNA_htseq_counts_all.csv")
+ 
+# cleanup intermediate objects
+#rm(y, z, i, DT)
+```
+
+```{r data-2b}
+counts <- read.csv("mrot_mRNA_htseq_counts_all.csv", 
+                   header = TRUE, 
+                   row.names = 1,
+                   check.names = FALSE)
+data.all <- data.matrix(counts)
+```
+
+
+###### Make DGE object
+
+```{r data-3}
+d0 <- DGEList(data.all)
+dim(d0)
+class(d0)
+d0$samples$group <- sample_data$group
+d0$samples$wave <- sample_data$wave
+d0$samples$tx <- sample_data$tx
+d0$samples$oocyte_egg <- sample_data$oocyte_egg
+d0$samples$pair <- sample_data$pair
+d0$samples$cage <- sample_data$cage
+d0$samples$id <- sample_data$id
+d0$samples
+summary(d0$samples$lib.size)
+```
+
+## Preprocessing
+
+###### Transformations from the raw scale
+
+```{r preproc-1}
+cpm.d0 <- cpm(d0)
+lcpm.d0 <- cpm(d0, log=TRUE)
+L <- mean(d0$samples$lib.size) * 1e-6
+M <- median(d0$samples$lib.size) * 1e-6
+c(L, M)
+```
+
+The average library size is about 13.4 million.   
+The minimum log-CPM value for each sample is log2(2/13.4) = -2.7.
+A count of 0 for this data maps to a log-CPM value of -2.7 after adding 
+the prior count.
+
+###### Remove genes with low expression  
+
+From: https://www.bioconductor.org/packages/devel/workflows/vignettes/RNAseq123/inst/doc/limmaWorkflow.html#reading-in-count-data 
+
+> The filterByExpr function in the edgeR package provides an automatic way to filter 
+genes, while keeping as many genes as possible with worthwhile counts.By default, 
+the function keeps genes with about 10 read counts or more in a minimum number of 
+samples, where the number of samples is chosen according to the minimum group 
+sample size. The actual filtering uses CPM values rather than counts in order to 
+avoid giving preference to samples with large library sizes. For this dataset, 
+the median library size is about 51 million and 10/51 approx. 0.2, so the 
+filterByExpr function keeps genes that have a CPM of 0.2 or more in at least 
+three samples. A biologically interesting gene should be expressed in at least 
+three samples because all the cell type groups have three replicates. The cutoffs 
+used depend on the sequencing depth and on the experimental design. If the library 
+sizes had been larger then a lower CPM cutoff would have been chosen, because 
+larger library sizes provide better resolution to explore more genes at lower 
+expression levels. Alternatively, smaller library sizes decrease our ability to 
+explore marginal genes and hence would have led to a higher CPM cutoff.
+
+```{r preproc-2}
+# How many genes are unexpressed in any samples?
+table(rowSums(d0$counts==0)==44)
+# Use filter by
+keep.exprs <- filterByExpr(d0, group=d0$samples$group)
+d1 <- d0[keep.exprs,, keep.lib.sizes=FALSE]
+dim(d0)
+dim(d1)
+```
+
+Kept 9155/12770 (72%) of genes
+
+###### Plots
+
+```{r preproc-3}
+lcpm.cutoff <- log2(10/M + 2/L)
+nsamples <- ncol(d0)
+col <- colorRampPalette(brewer.pal(8, "Set1"))(nsamples)
+par(mfrow=c(1,2))
+plot(density(lcpm.d0[,1]), col=col[1], lwd=2, 
+     ylim=c(0,0.26), las=2, main="", xlab="")
+title(main="A. Raw data", xlab="Log-cpm")
+abline(v=lcpm.cutoff, lty=3)
+for (i in 2:nsamples){
+den <- density(lcpm.d0[,i])
+lines(den$x, den$y, col=col[i], lwd=2)
+}
+lcpm.d1 <- cpm(d1, log=TRUE)
+plot(density(lcpm.d1[,1]), col=col[1], lwd=2, 
+     ylim=c(0,0.26), las=2, main="", xlab="")
+title(main="B. Filtered data", xlab="Log-cpm")
+abline(v=lcpm.cutoff, lty=3)
+for (i in 2:nsamples){
+den <- density(lcpm.d1[,i])
+lines(den$x, den$y, col=col[i], lwd=2)
+}
+```
+
+
+Dotted vertical lines mark the log-CPM threshold (equivalent to a CPM value of about 0.2) used in the filtering step.
+
+
+###### Normalization
+
+```{r preproc-4}
+d1 <- calcNormFactors(d1, method = "TMM")
+d1$samples$norm.factors
+```
+
+###### Unsupervised clustering
+
+```{r preproc-5}
+lcpm.d1 <- cpm(d1, log=TRUE)
+par(mfrow=c(2,2))
+# group
+col.group <- d1$samples$group
+levels(col.group) <-  brewer.pal(nlevels(col.group), "Set1")
+col.group <- as.character(col.group)
+# egg
+col.egg <- d1$samples$oocyte_egg
+levels(col.egg) <-  brewer.pal(nlevels(col.egg), "Paired")
+col.egg <- as.character(col.egg)
+# wave
+col.wave <- d1$samples$wave
+levels(col.wave) <-  brewer.pal(nlevels(col.wave), "Dark2")
+col.wave <- as.character(col.wave)
+# tx
+col.tx <- d1$samples$tx
+levels(col.tx) <-  brewer.pal(nlevels(col.tx), "Accent")
+col.tx <- as.character(col.tx)
+# plot
+plotMDS(lcpm.d1, labels=d1$samples$group, col=col.group)
+title(main="A. Sample groups")
+plotMDS(lcpm.d1, labels=d1$samples$oocyte_egg, col=col.egg)
+title(main="B. oocyte or egg")
+plotMDS(lcpm.d1, labels=d1$samples$wave, col=col.wave)
+title(main="C. wave")
+plotMDS(lcpm.d1, labels=d1$samples$tx, col=col.tx)
+title(main="D. tx")
+```
+
+## Plot egg/oocyte differences
+https://www.biostars.org/p/280615/ 
+
+```{r pca-1}
+#pca.1 <- prcomp(t(lcpm.d1), center = TRUE, scale = FALSE)
+#pca.1.scores <- pca.1$x
+#pca.1.scores <- pca.1.scores %>% 
+#  as_tibble(rownames = "id") 
+#pca.1.scores <- pca.1.scores %>% 
+#  left_join(d1$samples, by = "id") 
+#p.pca.1.scores <- pca.1.scores %>% 
+#  ggplot(aes(x = PC1, y = PC2, 
+#             color = factor(oocyte_egg), shape = "pair")) + 
+#  geom_point()
+#p.pca.1.scores
+```
+
+Using autoplot from ggfortify
+https://tavareshugo.github.io/data-carpentry-rnaseq/03_rnaseq_pca.html
+
+```{r pca-2}
+pca.1 <- prcomp(t(lcpm.d1), center = TRUE, scale = FALSE)
+svg("PCA_oocyte_egg_mRNA.svg")
+p.pca.1 <- autoplot(pca.1, data = d1$samples, 
+                    colour = "oocyte_egg", 
+                    shape = 16, 
+                    size = 4) + 
+  theme_classic(base_size = 14) + 
+  theme(legend.position = c(0.85, 0.9)) + 
+  scale_color_manual(values = c("#117733", "#88ccee"), 
+                     name = "Sample Type",
+                     labels = c("Egg", "Oocyte"))
+print(p.pca.1)
+dev.off()
+p.pca.1
+```
+
+## Split eggs and oocytes
+
+There is a very clear separation between eggs and oocytes. 
+Analyze them separately.  
+
+```{r split-1}
+sample_data_oocyte <- subset(sample_data, oocyte_egg == "oocyte")
+sample_data_egg <- subset(sample_data, oocyte_egg == "egg")
+sampleIDs_oocyte <- as.vector(sample_data_oocyte$id)
+sampleIDs_egg <- as.vector(sample_data_egg$id)
+# now drop from counts
+data.oocyte <- subset(data.all, select = sampleIDs_oocyte)
+data.egg <- subset(data.all, select = sampleIDs_egg)
+```
+
+# Oocytes
+
+## Oocyte Data prep
+
+###### Make DGE object
+
+```{r o-data-1}
+do <- DGEList(data.oocyte)
+dim(do)
+do$samples$group <- sample_data_oocyte$group
+do$samples$wave <- sample_data_oocyte$wave
+do$samples$tx <- sample_data_oocyte$tx
+do$samples$oocyte_egg <- sample_data_oocyte$oocyte_egg
+do$samples$pair <- sample_data_oocyte$pair
+do$samples$cage <- sample_data_oocyte$cage
+do$samples$id <- sample_data_oocyte$id
+do$samples
+summary(do$samples$lib.size)
+# add genes
+gene.names <- as.data.frame(rownames(data.oocyte))
+colnames(gene.names) <- c("geneID")
+head(gene.names)
+do$genes <- gene.names
+```
+
+## Oocyte Preprocessing
+
+###### Transformations from the raw scale
+
+```{r o-preproc-1}
+cpm.do <- cpm(do)
+lcpm.do <- cpm(do, log=TRUE)
+L <- mean(do$samples$lib.size) * 1e-6
+M <- median(do$samples$lib.size) * 1e-6
+c(L, M)
+```
+
+The average library size is about 14.3 million.   
+The minimum log-CPM value for each sample is log2(2/14.3) = -2.8.
+A count of 0 for this data maps to a log-CPM value of -2.8 after 
+adding the prior count.
+
+###### Remove genes with low expression  
+
+
+```{r o-preproc-2}
+# How many genes are unexpressed in any samples?
+table(rowSums(do$counts==0)==22)
+# Use filter by
+keep.exprs <- filterByExpr(do, group=do$samples$group)
+do.f <- do[keep.exprs,, keep.lib.sizes=FALSE]
+dim(do)
+dim(do.f)
+```
+
+Kept 8276/12770 (64.8%) of genes
+
+###### Plots
+
+```{r o-preproc-3}
+lcpm.cutoff <- log2(10/M + 2/L)
+nsamples <- ncol(do)
+col <- colorRampPalette(brewer.pal(8, "Set1"))(nsamples)
+par(mfrow=c(1,2))
+plot(density(lcpm.do[,1]), col=col[1], lwd=2, 
+     ylim=c(0,0.26), las=2, main="", xlab="")
+title(main="A. Raw data", xlab="Log-cpm")
+abline(v=lcpm.cutoff, lty=3)
+for (i in 2:nsamples){
+den <- density(lcpm.do[,i])
+lines(den$x, den$y, col=col[i], lwd=2)
+}
+lcpm.do.f <- cpm(do.f, log=TRUE)
+plot(density(lcpm.do.f[,1]), col=col[1], lwd=2, 
+     ylim=c(0,0.26), las=2, main="", xlab="")
+title(main="B. Filtered data", xlab="Log-cpm")
+abline(v=lcpm.cutoff, lty=3)
+for (i in 2:nsamples){
+den <- density(lcpm.do.f[,i])
+lines(den$x, den$y, col=col[i], lwd=2)
+}
+```
+
+
+Dotted vertical lines mark the log-CPM threshold (equivalent to a CPM value of about 0.2) used in the filtering step.
+
+
+###### Normalization
+
+```{r o-preproc-4}
+do.f <- calcNormFactors(do.f, method = "TMM")
+do.f$samples$norm.factors
+```
+
+###### Unsupervised clustering
+
+```{r o-preproc-5}
+lcpm.do.f <- cpm(do.f, log=TRUE)
+par(mfrow=c(2,2))
+# group
+col.group <- do.f$samples$group
+levels(col.group) <-  brewer.pal(nlevels(col.group), "Set1")
+col.group <- as.character(col.group)
+# cage
+col.cage <- do.f$samples$cage
+levels(col.cage) <-  brewer.pal(nlevels(col.cage), "Set2")
+col.cage <- as.character(col.cage)
+# wave
+col.wave <- do.f$samples$wave
+levels(col.wave) <-  brewer.pal(nlevels(col.wave), "Dark2")
+col.wave <- as.character(col.wave)
+# tx
+col.tx <- do.f$samples$tx
+levels(col.tx) <-  brewer.pal(nlevels(col.tx), "Accent")
+col.tx <- as.character(col.tx)
+# plot
+plotMDS(lcpm.do.f, labels=do.f$samples$group, col=col.group)
+title(main="A. Sample groups")
+plotMDS(lcpm.do.f, labels=do.f$samples$cage, col=col.cage)
+title(main="B. cage")
+plotMDS(lcpm.do.f, labels=do.f$samples$wave, col=col.wave)
+title(main="C. wave")
+plotMDS(lcpm.do.f, labels=do.f$samples$tx, col=col.tx)
+title(main="D. tx")
+```
+
+###### PCA plots
+
+Using autoplot from ggfortify
+https://tavareshugo.github.io/data-carpentry-rnaseq/03_rnaseq_pca.html
+
+```{r pca-a}
+pca.2 <- prcomp(t(lcpm.do.f), center = TRUE, scale = FALSE)
+svg("PCA_oocyte_mRNA.svg")
+p.pca.2 <- autoplot(pca.2, data = do.f$samples, 
+                    colour = "wave", 
+                    shape = "tx", 
+                    size = 4) + 
+  theme_classic(base_size = 14) + 
+  scale_color_manual(values =  c("#88ccee","#332283"), 
+                     name = "Time of Season",
+                     labels = c("Early", "Late")) + 
+  scale_shape_manual(values = c(16,17),
+                   name = "Body condition",
+                   labels = c("Control", "Poor"))
+print(p.pca.2)
+dev.off()
+p.pca.2
+```
+
+## Oocyte DEGs
+
+
+#### Design
+
+Helpful slides starting on 18 (2X2 factorial)
+
+https://s3.amazonaws.com/assets.datacamp.com/production/course_6456/slides/chapter2.pdf
+
+https://f1000research.com/articles/9-1444/v1
+
+> 
+##    expression      id tissue cells   group
+## 1        1.01  MOUSE1   LUNG     B  LUNG_B
+## 2        1.04  MOUSE2   LUNG     B  LUNG_B
+## 3        1.04  MOUSE3   LUNG     B  LUNG_B
+## 4        1.99  MOUSE4  BRAIN     B BRAIN_B
+## 5        2.36  MOUSE5  BRAIN     B BRAIN_B
+## 6        2.00  MOUSE6  BRAIN     B BRAIN_B
+## 7        2.89  MOUSE7   LUNG     T  LUNG_T
+## 8        3.12  MOUSE8   LUNG     T  LUNG_T
+## 9        2.98  MOUSE9   LUNG     T  LUNG_T
+## 10       5.00 MOUSE10  BRAIN     T BRAIN_T
+## 11       4.92 MOUSE11  BRAIN     T BRAIN_T
+## 12       4.78 MOUSE12  BRAIN     T BRAIN_T
+
+> 
+contrasts <- makeContrasts(
+  BVsT=(groupLUNG_B+groupBRAIN_B)/2-(groupLUNG_T+groupBRAIN_T)/2,
+  LungVsBrain=(groupLUNG_B+groupLUNG_T)/2-(groupBRAIN_B+groupBRAIN_T)/2,
+  BVsT_Lung=groupLUNG_B-groupLUNG_T,
+  BVsT_Brain=groupBRAIN_B-groupBRAIN_T,
+  LungVsBrain_B=groupLUNG_B-groupBRAIN_B, 
+  LungVsBrain_T=groupLUNG_T-groupBRAIN_T, 
+  levels=colnames(design))
+rownames(contrasts) <- gsub("group", "", rownames(contrasts))
+contrasts
+
+> 
+## Contrasts
+## Levels    BVsT LungVsBrain BVsT_Lung BVsT_Brain LungVsBrain_B LungVsBrain_T
+##   LUNG_B   0.5         0.5         1          0             1             0
+##   BRAIN_B  0.5        -0.5         0          1            -1             0
+##   LUNG_T  -0.5         0.5        -1          0             0             1
+##   BRAIN_T -0.5        -0.5         0         -1             0            -1
+
+
+```{r o-deg-1}
+f.o <- factor(sample_data_oocyte$group)
+f.o
+design.o <- model.matrix(~0+f.o)
+colnames(design.o) <- levels(f.o)
+design.o
+```
+
+#### Contrasts
+
+Interaction is differences of wave between treatments.
+
+```{r o-deg-2}
+cm.o <- makeContrasts(
+  U14vU1 = (w1_17U14 + w2_17U14)/2 - (w1_17U1 + w2_17U1)/2, 
+  wave2v1 = (w2_17U1 + w2_17U14)/2 - (w1_17U1 + w1_17U14)/2, 
+  wave2v1_U1 = w2_17U1 - w1_17U1, 
+  wave2v1_U14 = w2_17U14 - w1_17U14, 
+  U14vU1_wave1 = w1_17U14 - w1_17U1, 
+  U14vU1_wave2 = w2_17U14 - w2_17U1, 
+  interaction = (w2_17U1 - w1_17U1) - (w2_17U14 - w1_17U14),
+                      levels = design.o)
+cm.o
+```
+
+#### Voom
+
+
+
+```{r o-deg-3}
+par(mfrow=c(1,2))
+v.o <- voom(do.f, design.o, plot=TRUE)
+v.o
+vfit.o <- lmFit(v.o, design.o)
+vfit.o <- contrasts.fit(vfit.o, contrasts=cm.o)
+```
+
+#### Efit
+
+From https://f1000research.com/articles/5-1408  
+
+> Next, empirical Bayes moderation is carried out by borrowing information across all genes to obtain more precise estimates of gene-wise variability16. The model’s residual variances are plotted against average expression values in Figure 4B. It can be seen from this plot that the variance is no longer dependent on the mean expression level.
+
+
+```{r o-deg-4}
+efit.o <- eBayes(vfit.o)
+plotSA(efit.o, main="Final model: Mean-variance trend")
+```
+
+From https://f1000research.com/articles/5-1408
+
+>The treat method (McCarthy and Smyth 2009) can be used to calculate p-values from empirical Bayes moderated t-statistics with a minimum log-FC requirement. 
+
+
+#### Treat
+
+```{r o-deg-5}
+tfit.o <- treat(vfit.o, lfc=1)
+```
+
+
+#### Results - efit
+
+Get results 
+
+From `?decideTests`:
+
+> Setting method="separate" is equivalent to using topTable separately for each coefficient in the linear model fit and will identify the same probes as significantly differentially expressed if adjust.method is the same...The default method="separate" and adjust.method="BH" settings are appropriate for most analyses
+
+> Although this function enables users to set p-value and lfc cutoffs 
+simultaneously, this combination criterion is not generally recommended. 
+Unless the fold changes and p-values are very highly correlated, the addition of a fold change cutoff can increase the family-wise error rate or false discovery rate above the nominal level. Users wanting to use fold change thresholding are recommended to use treat instead of eBayes and to leave lfc at the default value when using decideTests.
+
+
+
+###### DEGs adjusted p < 0.05
+
+
+```{r o-deg-6}
+results.o <- decideTests(efit.o, 
+                    method = "separate", 
+                    adjust.method = "BH", 
+                    p.value = 0.05)
+summary(results.o)
+```
+
+###### DEGs adjusted p < 0.1
+
+
+```{r o-deg-7}
+results_expand.o <- decideTests(efit.o, 
+                    method = "separate", 
+                    adjust.method = "BH", 
+                    p.value = 0.1)
+summary(results_expand.o)
+```
+
+###### Main effect of treatment across entire season
+
+```{r o-deg-8}
+deg.o_tx <- topTable(efit.o, 
+                     coef = 1, 
+                     adjust = "BH", 
+                     n = Inf)
+length(which(deg.o_tx$adj.P.Val < 0.05))
+length(which(deg.o_tx$adj.P.Val < 0.10))
+deg.o_tx$gene <- rownames(deg.o_tx)
+write.csv(deg.o_tx, file = "deg_oocyte_U14vU1.csv", 
+          row.names = T, 
+          quote = F)
+deg.o_tx[which(deg.o_tx$adj.P.Val < 0.05),]
+oocyte.degs.tx <- row.names(deg.o_tx[which(deg.o_tx$adj.P.Val < 0.05),])
+```
+
+
+###### Main effect of season (wave) across treatments
+
+```{r o-deg-9}
+deg.o_wave <- topTable(efit.o, 
+                     coef = 2, 
+                     adjust = "BH", 
+                     n = Inf)
+length(which(deg.o_wave$adj.P.Val < 0.05))
+length(which(deg.o_wave$adj.P.Val < 0.10))
+deg.o_wave$gene <- rownames(deg.o_wave)
+write.csv(deg.o_wave, file = "deg_oocyte_wave2v1.csv", 
+          row.names = T, 
+          quote = F)
+deg.o_wave[which(deg.o_wave$adj.P.Val < 0.05),]
+oocyte.degs.wave <- row.names(deg.o_wave[which(deg.o_wave$adj.P.Val < 0.05),])
+```
+
+###### Effect of wave among control treatment
+
+```{r o-deg-10}
+deg.o_waveU1 <- topTable(efit.o, 
+                         coef = 3, 
+                         adjust = "BH", 
+                         n = Inf)
+length(which(deg.o_waveU1$adj.P.Val < 0.05))
+length(which(deg.o_waveU1$adj.P.Val < 0.1))
+deg.o_waveU1$gene <- rownames(deg.o_waveU1)
+write.csv(deg.o_waveU1, file = "deg_oocyte_wave2v1_u1.csv", 
+          row.names = T, 
+          quote = F)
+deg.o_waveU1[which(deg.o_waveU1$adj.P.Val < 0.05),]
+oocyte.degs.waveU1 <- row.names(deg.o_waveU1[which(deg.o_waveU1$adj.P.Val < 0.05),])
+```
+
+
+
+###### Effect of treatment in late season
+
+```{r o-deg-11}
+deg.o_tx_wave2 <- topTable(efit.o, 
+                           coef = 6, 
+                           adjust = "BH", 
+                           n = Inf)
+length(which(deg.o_tx_wave2$adj.P.Val < 0.05))
+length(which(deg.o_tx_wave2$adj.P.Val < 0.1))
+deg.o_tx_wave2$gene <- rownames(deg.o_tx_wave2)
+write.csv(deg.o_tx_wave2, file = "deg_oocyte_U14vU1_wave2.csv", 
+          row.names = T, 
+          quote = F)
+deg.o_tx_wave2[which(deg.o_tx_wave2$adj.P.Val < 0.05),]
+oocyte.degs.tx_w2 <- row.names(deg.o_tx_wave2[which(deg.o_tx_wave2$adj.P.Val < 0.05),])
+```
+
+
+
+In the toptable output: 
+logFC: log2 fold change of I5.9/I5.6
+AveExpr: Average expression across all samples, in log2 CPM
+t: logFC divided by its standard error
+P.Value: Raw p-value (based on t) from test that logFC differs from 0
+adj.P.Val: Benjamini-Hochberg false discovery rate adjusted p-value
+B: log-odds that gene is DE (arguably less useful than the other columns)
+
+
+#### Results - tfit
+
+From https://f1000research.com/articles/5-1408 
+
+> Some studies require more than an adjusted p-value cutoff. For a stricter definition on significance, one may require log-fold-changes (log-FCs) to be above a minimum value. The treat method17 can be used to calculate p-values from empirical Bayes moderated t-statistics with a minimum log-FC requirement. The number of differentially expressed genes are reduced to a total of 3,648 DE genes for basal versus LP, 3,834 DE genes for basal versus ML, and 414 DE genes for LP versus ML when testing requires genes to have a log-FC that is significantly greater than 1 (equivalent to a 2-fold difference between cell types on the original scale).
+
+
+###### DEGs adjusted p < 0.05
+
+
+```{r o-deg-12}
+results2.o <- decideTests(tfit.o, 
+                    method = "separate", 
+                    adjust.method = "BH", 
+                    p.value = 0.05)
+summary(results2.o)
+```
+
+###### DEGs adjusted p < 0.1
+
+
+```{r o-deg-13}
+results2_expand.o <- decideTests(tfit.o, 
+                    method = "separate", 
+                    adjust.method = "BH", 
+                    p.value = 0.1)
+summary(results2_expand.o)
+```
+
+## Visualize Results
+
+#### Mean-Difference Plots
+
+###### Treatment
+
+```{r o.viz-1}
+plotMD(efit.o, 
+       column=1, 
+       status=results_expand.o[,1], 
+       main=colnames(efit.o)[1], 
+       xlim=c(-8,13))
+abline(h=c(-1, 1), col="black", lty = "dashed")
+```
+
+#### Time of season
+
+```{r o.viz-2}
+plotMD(efit.o, 
+       column=2, 
+       status=results_expand.o[,2], 
+       main=colnames(efit.o)[2], 
+       xlim=c(-8,13))
+abline(h=c(-1, 1), col="black", lty = "dashed")
+```
+
+#### Heatmaps
+
+###### Treatment
+
+```{r o.viz-3}
+deg.o_tx <- arrange(deg.o_tx, adj.P.Val)
+U14vU1.topgenes <- deg.o_tx$gene[1:35]
+i <- which(v.o$genes$geneID %in% U14vU1.topgenes)
+#mycol <- colorpanel(1000,"#2986cc","#e1dfdf","#df4b4b")
+mycol <- colorpanel(1000, "red", "#e1dfdf", "blue")
+mycol.tx <- do.f$samples$tx
+levels(mycol.tx) <-  c("#88ccee","#332283")
+mycol.tx <- as.character(mycol.tx)
+```
+
+```{r o.viz-4}
+svg("heatmap_oocyte_mRNA_tx.svg")
+p.heatmap.tx <- heatmap.2(lcpm.do.f[i,], scale="row",
+   labRow=v.o$genes$geneID[i], 
+   labCol=v.o$targets$group,
+   col=mycol, 
+   trace="none", 
+   density.info="none", 
+   #margin=c(8,6), 
+   #lhei=c(2,10), 
+   ColSideColors = mycol.tx,  
+   dendrogram="column")
+print(p.heatmap.tx)
+dev.off()
+```
+
+###### Wave
+
+```{r o.viz-5}
+deg.o_wave <- arrange(deg.o_wave, adj.P.Val)
+wave2v1.topgenes <- deg.o_wave$gene[1:956]
+i.wave <- which(v.o$genes$geneID %in% wave2v1.topgenes)
+mycol.wave <- do.f$samples$wave
+levels(mycol.wave) <-   c("#88ccee","#332283")
+mycol.wave <- as.character(mycol.wave)
+```
+
+Add in colors for module membership
+File comes from Mal Hagadorn - added WGCNA module membership to 
+gene IDs and the hex code used to represent them in other figures
+
+
+```{r o.viz-5b}
+deg.colors <- read.csv("DEGlistall_SimpliefiedOocyteLabelsandColors.csv")
+deg.colors <- deg.colors %>% 
+    mutate(Color.oocytemodule = replace_na(Color.oocytemodule, "white"))
+gene.cols <- as.data.frame(lcpm.do.f[i.wave,])
+gene.cols <- gene.cols %>% 
+  rownames_to_column("geneID") %>% 
+  left_join(deg.colors, by = c("geneID" = "DEGlist"))
+mycol.genes <- as.character(gene.cols$Color.oocytemodule)
+```
+
+```{r o.viz-6}
+svg("heatmap_oocyte_mRNA_wave.svg")
+p.heatmap.wave <- heatmap.2(lcpm.do.f[i.wave,], scale="row",
+   #labRow=v.o$genes$geneID[i.wave], 
+   labCol=v.o$targets$group,
+   col=mycol, 
+   trace="none", 
+   density.info="none", 
+   #margin=c(8,6), 
+   #lhei=c(2,10), 
+   ColSideColors = mycol.wave,  
+   RowSideColors = mycol.genes, 
+   dendrogram="both")
+print(p.heatmap.wave)
+dev.off()
+```
+
+# Eggs
+
+## Egg Data prep
+
+###### Make DGE object
+
+```{r e-data-1}
+de <- DGEList(data.egg)
+dim(de)
+de$samples$group <- sample_data_egg$group
+de$samples$wave <- sample_data_egg$wave
+de$samples$tx <- sample_data_egg$tx
+de$samples$oocyte_egg <- sample_data_egg$oocyte_egg
+de$samples$pair <- sample_data_egg$pair
+de$samples$cage <- sample_data_egg$cage
+de$samples$id <- sample_data_egg$id
+de$samples
+summary(de$samples$lib.size)
+# add genes
+de$genes <- gene.names
+```
+
+## Egg Preprocessing
+
+###### Transformations from the raw scale
+
+```{r e-preproc-1}
+cpm.de <- cpm(de)
+lcpm.de <- cpm(de, log=TRUE)
+L <- mean(de$samples$lib.size) * 1e-6
+M <- median(de$samples$lib.size) * 1e-6
+c(L, M)
+```
+
+The average library size is about 12.5 million.   
+The minimum log-CPM value for each sample is log2(2/12.5) = -2.6.
+A count of 0 for this data maps to a log-CPM value of -2.6 after adding the prior count.
+
+###### Remove genes with low expression  
+
+
+```{r e-preproc-2}
+# How many genes are unexpressed in any samples?
+table(rowSums(de$counts==0)==22)
+# Use filter by
+keep.exprs <- filterByExpr(de, group=de$samples$group)
+de.f <- de[keep.exprs,, keep.lib.sizes=FALSE]
+dim(de)
+dim(de.f)
+```
+
+Kept 9125/12770 (71.5%) of genes
+
+###### Plots
+
+```{r e-preproc-3}
+lcpm.de <- cpm(de, log=TRUE)
+cpm.cutoff <- log2(10/M + 2/L)
+nsamples <- ncol(do)
+col <- colorRampPalette(brewer.pal(8, "Set1"))(nsamples)
+par(mfrow=c(1,2))
+plot(density(lcpm.de[,1]), 
+     col=col[1], 
+     lwd=2, 
+     ylim=c(0,0.26), 
+     las=2, 
+     main="", xlab="")
+title(main="A. Raw data", xlab="Log-cpm")
+abline(v=cpm.cutoff, lty=3)
+for (i in 2:nsamples){
+den <- density(lcpm.de[,i])
+lines(den$x, den$y, col=col[i], lwd=2)
+}
+lcpm.de.f <- cpm(de.f, log=TRUE)
+plot(density(lcpm.de.f[,1]), 
+     col=col[1], 
+     lwd=2, 
+     ylim=c(0,0.26), 
+     las=2, main="", xlab="")
+title(main="B. Filtered data", xlab="Log-cpm")
+abline(v=cpm.cutoff, lty=3)
+for (i in 2:nsamples){
+den <- density(lcpm.de.f[,i])
+lines(den$x, den$y, col=col[i], lwd=2)
+}
+```
+
+
+Dotted vertical lines mark the log-CPM threshold (equivalent to a CPM value of 
+about 0.2) used in the filtering step.
+
+
+###### Normalization
+
+```{r e-preproc-4}
+de.f <- calcNormFactors(de.f, method = "TMM")
+de.f$samples$norm.factors
+```
+
+###### Unsupervised clustering
+
+```{r e-preproc-5}
+lcpm.de.f <- cpm(de.f, log=TRUE)
+par(mfrow=c(1,4))
+col.wave <- de.f$samples$wave
+levels(col.wave) <-  brewer.pal(nlevels(col.wave), "Set1")
+col.wave <- as.character(col.wave)
+col.tx <- de.f$samples$tx
+levels(col.tx) <-  brewer.pal(nlevels(col.tx), "Set2")
+col.tx <- as.character(col.tx)
+col.cage <- de.f$samples$cage
+levels(col.cage) <-  brewer.pal(nlevels(col.cage), "Accent")
+col.cage <- as.character(col.cage)
+plotMDS(lcpm.de.f, labels=de.f$samples$wave, col=col.wave)
+title(main="A. wave")
+plotMDS(lcpm.de.f, labels=de.f$samples$tx, col=col.tx)
+title(main="B. tx")
+plotMDS(lcpm.de.f, labels=de.f$samples$cage, col=col.cage)
+title(main="C. cage")
+plotMDS(lcpm.de.f, labels=de.f$samples$id, col=col.cage)
+title(main="D. id")
+```
+
+###### PCA plots
+
+Using autoplot from ggfortify
+https://tavareshugo.github.io/data-carpentry-rnaseq/03_rnaseq_pca.html
+
+```{r pca-3}
+pca.3 <- prcomp(t(lcpm.de.f), center = TRUE, scale = FALSE)
+svg("PCA_egg_mRNA.svg")
+p.pca.2 <- autoplot(pca.3, data = de.f$samples, 
+                    colour = "wave", 
+                    shape = "tx", 
+                    size = 4) + 
+  geom_text(label = de.f$samples$id) + 
+  theme_classic(base_size = 14) + 
+  scale_color_manual(values =  c("#999933","#117733"), 
+                     name = "Time of Season",
+                     labels = c("Early", "Late")) + 
+  scale_shape_manual(values = c(16,17),
+                   name = "Body condition",
+                   labels = c("Control", "Poor"))
+print(p.pca.2)
+dev.off()
+p.pca.2
+```
+
+# Eggs with outlier removed
+
+Sample 202198 is an outlier. Remove from DGE object and 
+rerun the Egg analysis
+
+## Egg Data prep
+
+###### Make DGE object
+
+```{r e2-data-1}
+data.egg.r <- data.egg[,colnames(data.egg)!="202198"]
+sample_data_egg.r <- subset(sample_data_egg, id != "202198")
+#
+de.r <- DGEList(data.egg.r)
+dim(de.r)
+de.r$samples$group <- sample_data_egg.r$group
+de.r$samples$wave <- sample_data_egg.r$wave
+de.r$samples$tx <- sample_data_egg.r$tx
+de.r$samples$oocyte_egg <- sample_data_egg.r$oocyte_egg
+de.r$samples$pair <- sample_data_egg.r$pair
+de.r$samples$cage <- sample_data_egg.r$cage
+de.r$samples$id <- sample_data_egg.r$id
+de.r$samples
+summary(de.r$samples$lib.size)
+# add genes
+de.r$genes <- gene.names
+```
+
+## Egg Preprocessing
+
+###### Transformations from the raw scale
+
+```{r e2-preproc-1}
+cpm.de.r <- cpm(de.r)
+lcpm.de.r <- cpm(de.r, log=TRUE)
+L <- mean(de.r$samples$lib.size) * 1e-6
+M <- median(de.r$samples$lib.size) * 1e-6
+c(L, M)
+```
+
+The average library size is about 12.5 million.   
+The minimum log-CPM value for each sample is log2(2/12.5) = -2.6.
+A count of 0 for this data maps to a log-CPM value of -2.6 after adding the prior count.
+
+###### Remove genes with low expression  
+
+
+```{r e2-preproc-2}
+# How many genes are unexpressed in any samples?
+table(rowSums(de.r$counts==0)==21)
+# Use filter by
+keep.exprs <- filterByExpr(de.r, group=de.r$samples$group)
+de.r.f <- de.r[keep.exprs,, keep.lib.sizes=FALSE]
+dim(de.r)
+dim(de.r.f)
+```
+
+Kept 9200/12770 (72%) of genes
+
+###### Plots
+
+```{r e2-preproc-3}
+lcpm.de.r <- cpm(de.r, log=TRUE)
+cpm.cutoff <- log2(10/M + 2/L)
+nsamples <- ncol(de.r)
+col <- colorRampPalette(brewer.pal(8, "Set1"))(nsamples)
+par(mfrow=c(1,2))
+plot(density(lcpm.de.r[,1]), 
+     col=col[1], 
+     lwd=2, 
+     ylim=c(0,0.26), 
+     las=2, 
+     main="", xlab="")
+title(main="A. Raw data", xlab="Log-cpm")
+abline(v=cpm.cutoff, lty=3)
+for (i in 2:nsamples){
+den <- density(lcpm.de.r[,i])
+lines(den$x, den$y, col=col[i], lwd=2)
+}
+lcpm.de.r.f <- cpm(de.r.f, log=TRUE)
+plot(density(lcpm.de.r.f[,1]), 
+     col=col[1], 
+     lwd=2, 
+     ylim=c(0,0.26), 
+     las=2, main="", xlab="")
+title(main="B. Filtered data", xlab="Log-cpm")
+abline(v=cpm.cutoff, lty=3)
+for (i in 2:nsamples){
+den <- density(lcpm.de.r.f[,i])
+lines(den$x, den$y, col=col[i], lwd=2)
+}
+```
+
+
+Dotted vertical lines mark the log-CPM threshold (equivalent to a CPM value of 
+about 0.2) used in the filtering step.
+
+
+###### Normalization
+
+```{r e2-preproc-4}
+de.r.f <- calcNormFactors(de.r.f, method = "TMM")
+de.r.f$samples$norm.factors
+```
+
+###### Unsupervised clustering
+
+```{r e2-preproc-5}
+lcpm.de.r.f <- cpm(de.r.f, log=TRUE)
+par(mfrow=c(1,4))
+col.wave <- de.r.f$samples$wave
+levels(col.wave) <-  brewer.pal(nlevels(col.wave), "Set1")
+col.wave <- as.character(col.wave)
+col.tx <- de.r.f$samples$tx
+levels(col.tx) <-  brewer.pal(nlevels(col.tx), "Set2")
+col.tx <- as.character(col.tx)
+col.cage <- de.r.f$samples$cage
+levels(col.cage) <-  brewer.pal(nlevels(col.cage), "Accent")
+col.cage <- as.character(col.cage)
+plotMDS(lcpm.de.r.f, labels=de.r.f$samples$wave, col=col.wave)
+title(main="A. wave")
+plotMDS(lcpm.de.r.f, labels=de.r.f$samples$tx, col=col.tx)
+title(main="B. tx")
+plotMDS(lcpm.de.r.f, labels=de.r.f$samples$cage, col=col.cage)
+title(main="C. cage")
+plotMDS(lcpm.de.r.f, labels=de.r.f$samples$id, col=col.cage)
+title(main="D. id")
+```
+
+###### PCA plots
+
+Using autoplot from ggfortify
+https://tavareshugo.github.io/data-carpentry-rnaseq/03_rnaseq_pca.html
+
+```{r pca-4}
+pca.4 <- prcomp(t(lcpm.de.r.f), center = TRUE, scale = FALSE)
+svg("PCA_eggNoOutlier_mRNA.svg")
+p.pca.3 <- autoplot(pca.4, data = de.r.f$samples, 
+                    colour = "wave", 
+                    shape = "tx", 
+                    size = 4) + 
+  theme_classic(base_size = 14) + 
+  scale_color_manual(values =  c("#999933","#117733"), 
+                     name = "Time of Season",
+                     labels = c("Early", "Late")) + 
+  scale_shape_manual(values = c(16,17),
+                   name = "Body condition",
+                   labels = c("Control", "Poor"))
+print(p.pca.3)
+dev.off()
+p.pca.3
+```
+
+## Egg DEGs
+
+
+#### Design
+
+Helpful slides starting on 18 (2X2 factorial)
+
+https://s3.amazonaws.com/assets.datacamp.com/production/course_6456/slides/chapter2.pdf
+
+https://f1000research.com/articles/9-1444/v1
+
+> 
+##    expression      id tissue cells   group
+## 1        1.01  MOUSE1   LUNG     B  LUNG_B
+## 2        1.04  MOUSE2   LUNG     B  LUNG_B
+## 3        1.04  MOUSE3   LUNG     B  LUNG_B
+## 4        1.99  MOUSE4  BRAIN     B BRAIN_B
+## 5        2.36  MOUSE5  BRAIN     B BRAIN_B
+## 6        2.00  MOUSE6  BRAIN     B BRAIN_B
+## 7        2.89  MOUSE7   LUNG     T  LUNG_T
+## 8        3.12  MOUSE8   LUNG     T  LUNG_T
+## 9        2.98  MOUSE9   LUNG     T  LUNG_T
+## 10       5.00 MOUSE10  BRAIN     T BRAIN_T
+## 11       4.92 MOUSE11  BRAIN     T BRAIN_T
+## 12       4.78 MOUSE12  BRAIN     T BRAIN_T
+
+> 
+contrasts <- makeContrasts(
+  BVsT=(groupLUNG_B+groupBRAIN_B)/2-(groupLUNG_T+groupBRAIN_T)/2,
+  LungVsBrain=(groupLUNG_B+groupLUNG_T)/2-(groupBRAIN_B+groupBRAIN_T)/2,
+  BVsT_Lung=groupLUNG_B-groupLUNG_T,
+  BVsT_Brain=groupBRAIN_B-groupBRAIN_T,
+  LungVsBrain_B=groupLUNG_B-groupBRAIN_B, 
+  LungVsBrain_T=groupLUNG_T-groupBRAIN_T, 
+  levels=colnames(design))
+rownames(contrasts) <- gsub("group", "", rownames(contrasts))
+contrasts
+
+> 
+## Contrasts
+## Levels    BVsT LungVsBrain BVsT_Lung BVsT_Brain LungVsBrain_B LungVsBrain_T
+##   LUNG_B   0.5         0.5         1          0             1             0
+##   BRAIN_B  0.5        -0.5         0          1            -1             0
+##   LUNG_T  -0.5         0.5        -1          0             0             1
+##   BRAIN_T -0.5        -0.5         0         -1             0            -1
+
+
+
+```{r e-deg-1}
+f.e <- factor(sample_data_egg.r$group)
+f.e
+design.e <- model.matrix(~0+f.e)
+colnames(design.e) <- levels(f.e)
+design.e
+```
+
+#### Contrasts
+
+Interaction is differences of wave between treatments.
+
+
+```{r e-deg-2}
+cm.e <- makeContrasts(
+  U14vU1 = (w1_17U14 + w2_17U14)/2 - (w1_17U1 + w2_17U1)/2, 
+  wave2v1 = (w2_17U1 + w2_17U14)/2 - (w1_17U1 + w1_17U14)/2, 
+  wave2v1_U1 = w2_17U1 - w1_17U1, 
+  wave2v1_U14 = w2_17U14 - w1_17U14, 
+  U14vU1_wave1 = w1_17U14 - w1_17U1, 
+  U14vU1_wave2 = w2_17U14 - w2_17U1, 
+  interaction = (w2_17U1 - w1_17U1) - (w2_17U14 - w1_17U14),
+                      levels = design.e)
+cm.e
+```
+
+#### Voom
+
+The treat method (McCarthy and Smyth 2009) can be used to calculate p-values from empirical Bayes moderated t-statistics with a minimum log-FC requirement. 
+
+
+```{r e-deg-3}
+par(mfrow=c(1,2))
+v.e <- voom(de.r.f, design.e, plot=TRUE)
+v.e
+vfit.e <- lmFit(v.e, design.e)
+vfit.e <- contrasts.fit(vfit.e, contrasts=cm.e)
+```
+
+#### Efit
+
+From https://f1000research.com/articles/5-1408  
+
+> Next, empirical Bayes moderation is carried out by borrowing information across all genes to obtain more precise estimates of gene-wise variability16. The model’s residual variances are plotted against average expression values in Figure 4B. It can be seen from this plot that the variance is no longer dependent on the mean expression level.
+
+
+```{r e-deg-4}
+efit.e <- eBayes(vfit.e)
+plotSA(efit.e, main="Final model: Mean-variance trend")
+```
+
+From https://f1000research.com/articles/5-1408
+
+>The treat method (McCarthy and Smyth 2009) can be used to calculate p-values from empirical Bayes moderated t-statistics with a minimum log-FC requirement. 
+
+
+#### Treat
+
+```{r e-deg-5}
+tfit.e <- treat(vfit.e, lfc=1)
+```
+
+#### Results
+
+Get results 
+
+From `?decideTests`:
+
+> Setting method="separate" is equivalent to using topTable separately for each 
+coefficient in the linear model fit and will identify the same probes as 
+significantly differentially expressed if adjust.method is the same...The 
+default method="separate" and adjust.method="BH" settings are appropriate for 
+most analyses
+
+> Although this function enables users to set p-value and lfc cutoffs 
+simultaneously, this combination criterion is not generally recommended. 
+Unless the fold changes and p-values are very highly correlated, the addition 
+of a fold change cutoff can increase the family-wise error rate or false 
+discovery rate above the nominal level. Users wanting to use fold change 
+thresholding are recommended to use treat instead of eBayes and to leave lfc at 
+the default value when using decideTests.
+
+From https://f1000research.com/articles/5-1408 
+
+> Some studies require more than an adjusted p-value cutoff. For a stricter definition on significance, one may require log-fold-changes (log-FCs) to be above a minimum value. The treat method17 can be used to calculate p-values from empirical Bayes moderated t-statistics with a minimum log-FC requirement. The number of differentially expressed genes are reduced to a total of 3,648 DE genes for basal versus LP, 3,834 DE genes for basal versus ML, and 414 DE genes for LP versus ML when testing requires genes to have a log-FC that is significantly greater than 1 (equivalent to a 2-fold difference between cell types on the original scale).
+
+#### Results - efit
+
+Get results 
+
+From `?decideTests`:
+
+> Setting method="separate" is equivalent to using topTable separately for each coefficient in the linear model fit and will identify the same probes as significantly differentially expressed if adjust.method is the same...The default method="separate" and adjust.method="BH" settings are appropriate for most analyses
+
+> Although this function enables users to set p-value and lfc cutoffs 
+simultaneously, this combination criterion is not generally recommended. 
+Unless the fold changes and p-values are very highly correlated, the addition of a fold change cutoff can increase the family-wise error rate or false discovery rate above the nominal level. Users wanting to use fold change thresholding are recommended to use treat instead of eBayes and to leave lfc at the default value when using decideTests.
+
+
+
+###### DEGs adjusted p < 0.05
+
+
+```{r e-deg-6}
+results.e <- decideTests(efit.e, 
+                    method = "separate", 
+                    adjust.method = "BH", 
+                    p.value = 0.05)
+summary(results.e)
+```
+
+###### DEGs adjusted p < 0.1
+
+
+```{r e-deg-7}
+results_expand.e <- decideTests(efit.e, 
+                    method = "separate", 
+                    adjust.method = "BH", 
+                    p.value = 0.1)
+summary(results_expand.e)
+```
+
+###### Main effect of treatment 
+
+```{r e-deg-8}
+deg.e_tx <- topTable(efit.e, 
+                           coef = 1, 
+                           adjust = "BH", 
+                           n = Inf)
+length(which(deg.e_tx$adj.P.Val < 0.05))
+length(which(deg.e_tx$adj.P.Val < 0.1))
+deg.e_tx$gene <- rownames(deg.e_tx)
+write.csv(deg.e_tx, file = "deg_egg_U14vU1.csv", 
+          row.names = T, 
+          quote = F)
+deg.e_tx[which(deg.e_tx$adj.P.Val < 0.05),]
+egg.degs.tx <- 
+  row.names(deg.e_tx[which(deg.e_tx$adj.P.Val < 0.05),])
+```
+
+###### Main effect of season (wave )
+
+```{r e-deg-8}
+deg.e_wave <- topTable(efit.e, 
+                           coef = 2, 
+                           adjust = "BH", 
+                           n = Inf)
+length(which(deg.e_wave$adj.P.Val < 0.05))
+length(which(deg.e_wave$adj.P.Val < 0.1))
+deg.e_wave$gene <- rownames(deg.e_wave)
+write.csv(deg.e_wave, file = "deg_egg_wave2v1.csv", 
+          row.names = T, 
+          quote = F)
+deg.e_wave[which(deg.e_wave$adj.P.Val < 0.05),]
+egg.degs.wave <- 
+  row.names(deg.e_wave[which(deg.e_wave$adj.P.Val < 0.05),])
+```
+
+###### Effect of treatment in early season
+
+```{r e-deg-9}
+deg.e_tx_wave1 <- topTable(efit.e, 
+                           coef = 5, 
+                           adjust = "BH", 
+                           n = Inf)
+length(which(deg.e_tx_wave1$adj.P.Val < 0.05))
+length(which(deg.e_tx_wave1$adj.P.Val < 0.1))
+deg.e_tx_wave1$gene <- rownames(deg.e_tx_wave1)
+write.csv(deg.e_tx_wave1, file = "deg_egg_U14vU1_wave1.csv", 
+          row.names = T, 
+          quote = F)
+deg.e_tx_wave1[which(deg.e_tx_wave1$adj.P.Val < 0.05),]
+egg.degs.tx_w1 <- 
+  row.names(deg.e_tx_wave1[which(deg.e_tx_wave1$adj.P.Val < 0.05),])
+```
+
+
+
+In the toptable output: 
+logFC: log2 fold change of I5.9/I5.6
+AveExpr: Average expression across all samples, in log2 CPM
+t: logFC divided by its standard error
+P.Value: Raw p-value (based on t) from test that logFC differs from 0
+adj.P.Val: Benjamini-Hochberg false discovery rate adjusted p-value
+B: log-odds that gene is DE (arguably less useful than the other columns)
+
+
+
+#### Results - tfit
+
+From https://f1000research.com/articles/5-1408 
+
+> Some studies require more than an adjusted p-value cutoff. For a stricter definition on significance, one may require log-fold-changes (log-FCs) to be above a minimum value. The treat method17 can be used to calculate p-values from empirical Bayes moderated t-statistics with a minimum log-FC requirement. The number of differentially expressed genes are reduced to a total of 3,648 DE genes for basal versus LP, 3,834 DE genes for basal versus ML, and 414 DE genes for LP versus ML when testing requires genes to have a log-FC that is significantly greater than 1 (equivalent to a 2-fold difference between cell types on the original scale).
+
+
+###### DEGs adjusted p < 0.05
+
+
+```{r e-deg-10}
+results2.e <- decideTests(tfit.e, 
+                    method = "separate", 
+                    adjust.method = "BH", 
+                    p.value = 0.05)
+summary(results2.e)
+```
+
+###### DEGs adjusted p < 0.1
+
+
+```{r e-deg-11}
+results2_expand.e <- decideTests(tfit.e, 
+                    method = "separate", 
+                    adjust.method = "BH", 
+                    p.value = 0.1)
+summary(results2_expand.e)
+```
+
+# citations, version#s
+
+```{r book-1}
+packageVersion("tidyverse"); citation("tidyverse")
+packageVersion("edgeR"); citation("edgeR")
+packageVersion("limma"); citation("limma")
+#packageVersion("Glimma"); citation("Glimma")
+packageVersion("RColorBrewer"); citation("RColorBrewer")
+packageVersion("gplots"); citation("gplots")
+citation()
+R.version.string
+```
